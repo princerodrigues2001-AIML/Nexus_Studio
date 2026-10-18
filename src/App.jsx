@@ -3,7 +3,7 @@ import {
   Shield, Sparkles, Terminal, Code, Cpu, Trophy, User, 
   LogIn, Lock, Menu, X, LogOut, Plus, Search, Send, Play, 
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
-  Key, Zap, Grid, Bug, RotateCcw
+  Key, Zap, Grid, Bug, RotateCcw, Image, Paperclip 
 } from 'lucide-react';
 
 export default function App() {
@@ -41,36 +41,33 @@ export default function App() {
   const [snippetCode, setSnippetCode] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
-  // --- AURA AI STATES ---
+  // --- AURA AI STATES (WITH IMAGE SUPPORT) ---
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [tempKeyInput, setTempKeyInput] = useState(customApiKey);
+  const [selectedImage, setSelectedImage] = useState(null); // Base64 image
   const [chatHistory, setChatHistory] = useState([
-    { sender: 'aura', text: 'Hello Prince! I am Aura, your AI coding and study partner. Ask me about React, JavaScript, Python, CSS, or your study schedule!' }
+    { sender: 'aura', text: "Hey Prince! I'm Aura. Good morning! How are you doing today? Feel free to chat with me, ask coding questions, or attach screenshots using the paperclip icon!" }
   ]);
   const chatEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // --- ARCADE GAME STATES ---
-  const [activeGame, setActiveGame] = useState(null); // 'memory' | 'typer' | 'ttt' | 'bug'
-  
-  // Game 1: Memory Match
+  const [activeGame, setActiveGame] = useState(null);
   const memoryIcons = ['⚡', '🚀', '💻', '🔥', '⚡', '🚀', '💻', '🔥'];
   const [cards, setCards] = useState([]);
   const [flipped, setFlipped] = useState([]);
   const [solved, setSolved] = useState([]);
 
-  // Game 2: Speed Typer
   const codeWords = ['useState', 'useEffect', 'function', 'Promise', 'async', 'tailwind', 'component', 'database', 'interface', 'variable'];
   const [targetWord, setTargetWord] = useState('useState');
   const [typedWord, setTypedWord] = useState('');
   const [typerStreak, setTyperStreak] = useState(0);
 
-  // Game 3: Tic-Tac-Toe
   const [board, setBoard] = useState(Array(9).fill(null));
   const [tttStatus, setTttStatus] = useState('Your turn (X)');
 
-  // Game 4: Bug Squasher
   const [bugPos, setBugPos] = useState(4);
   const [bugsSquashed, setBugsSquashed] = useState(0);
 
@@ -202,86 +199,104 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // --- AURA AI HANDLER (GEMINI API + SMART BUILT-IN ENGINE) ---
-  const getSmartLocalReply = (msg) => {
-    const lower = msg.toLowerCase();
-    if (lower.includes('hi') || lower.includes('hello') || lower.includes('hey')) {
-      return "Hey Prince! I'm online and ready to help. Ask me to write code, explain React concepts, or help plan your studies!";
-    }
-    if (lower.includes('react') || lower.includes('hook') || lower.includes('state')) {
-      return "In React, `useState` stores dynamic values and `useEffect` runs side effects (like saving to localStorage or fetching from Firebase).\n\nExample:\nconst [count, setCount] = useState(0);";
-    }
-    if (lower.includes('center') || lower.includes('css') || lower.includes('flex')) {
-      return "Here is the cleanest way to center anything in CSS:\n\ndisplay: flex;\njustify-content: center;\nalign-items: center;";
-    }
-    if (lower.includes('python')) {
-      return "Python is awesome for AI and backend logic! Here's a quick list comprehension example:\n\nsquares = [x**2 for x in range(10)]";
-    }
-    if (lower.includes('firebase') || lower.includes('sync') || lower.includes('database')) {
-      return "To sync data across your laptop and phone in real time, we use Firebase Firestore's `onSnapshot` listener so every device updates automatically!";
-    }
-    if (lower.includes('study') || lower.includes('exam') || lower.includes('focus')) {
-      return "Try the 45/15 Pomodoro method: Code or study intensely for 45 minutes with zero phone distractions, then take a 15-minute Arcade break!";
-    }
-    return `Here is a quick breakdown for "${msg}":\n1. Break the problem into smaller components.\n2. Test your state updates step-by-step.\n\n(Tip: Click the 🔑 API Key button in the top-right to connect your live Gemini key for unlimited deep AI answers!)`;
+  // --- IMAGE UPLOAD HANDLER ---
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelectedImage(reader.result); // Base64 string
+      showToast('📎 Image attached successfully!');
+    };
+    reader.readAsDataURL(file);
   };
 
+  // --- AURA AI HANDLER (TRUE GEMINI API WITH MULTIMODAL IMAGE SUPPORT) ---
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const userMessage = chatInput.trim();
-    if (!userMessage || isAiLoading) return;
+    if ((!userMessage && !selectedImage) || isAiLoading) return;
 
-    const updatedHistory = [...chatHistory, { sender: 'user', text: userMessage }];
+    const currentImage = selectedImage;
+    const updatedHistory = [...chatHistory, { 
+      sender: 'user', 
+      text: userMessage || '[Attached Image]', 
+      image: currentImage 
+    }];
     setChatHistory(updatedHistory);
     setChatInput('');
+    setSelectedImage(null);
     setIsAiLoading(true);
 
     const activeKey = customApiKey.trim() || import.meta.env.VITE_GEMINI_API_KEY;
 
-    if (activeKey) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: userMessage }] }]
-            })
-          }
-        );
-        const data = await response.json();
-        const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (aiReply) {
-          setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
-          setIsAiLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.error('Gemini API Error:', err);
-      }
+    if (!activeKey) {
+      setTimeout(() => {
+        setChatHistory([...updatedHistory, { 
+          sender: 'aura', 
+          text: "Hey! I'm ready to chat, but you need to connect your Gemini API key first. Click the '🔑 Set Gemini Key' button in the top right corner of this AI chat tab!" 
+        }]);
+        setIsAiLoading(false);
+      }, 500);
+      return;
     }
 
-    setTimeout(() => {
-      setChatHistory([...updatedHistory, { sender: 'aura', text: getSmartLocalReply(userMessage) }]);
+    try {
+      // Build content parts for Gemini API (supports both text and inline images)
+      const parts = [];
+      if (userMessage) {
+        parts.push({ text: `You are Aura, a warm, friendly, and deeply human-like AI companion and coding assistant created for Prince Rodrigues. Respond naturally, conversationally, and warmly to greetings (like hi, hello, good morning). If shown an image or code snippet, analyze it helpfully.\n\nUser Message: ${userMessage}` });
+      } else {
+        parts.push({ text: "Please analyze this attached image for Prince." });
+      }
+
+      if (currentImage) {
+        // Extract base64 data and mime type
+        const matches = currentImage.match(/^data:(.+);base64,(.+)$/);
+        if (matches) {
+          parts.push({
+            inline_data: {
+              mime_type: matches[1],
+              data: matches[2]
+            }
+          });
+        }
+      }
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts }] })
+        }
+      );
+      const data = await response.json();
+      const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (aiReply) {
+        setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
+      } else {
+        setChatHistory([...updatedHistory, { sender: 'aura', text: "Hmm, I didn't get a valid response back from the Gemini servers. Check your API key!" }]);
+      }
+    } catch (err) {
+      console.error('Gemini API Error:', err);
+      setChatHistory([...updatedHistory, { sender: 'aura', text: "Oops! Something went wrong connecting to Gemini. Please check your network or API key." }]);
+    } finally {
       setIsAiLoading(false);
-    }, 500);
+    }
   };
 
   const handleSaveApiKey = (e) => {
     e.preventDefault();
     setCustomApiKey(tempKeyInput.trim());
     setShowKeyModal(false);
-    showToast('🔑 Gemini API Key saved!');
+    showToast('🔑 Gemini API Key saved successfully!');
   };
 
   // --- ARCADE GAMES LOGIC ---
-  // 1. Memory Match
   const initMemoryGame = () => {
-    const shuffled = [...memoryIcons]
-      .sort(() => Math.random() - 0.5)
-      .map((icon, idx) => ({ id: idx, icon }));
+    const shuffled = [...memoryIcons].sort(() => Math.random() - 0.5).map((icon, idx) => ({ id: idx, icon }));
     setCards(shuffled);
     setFlipped([]);
     setSolved([]);
@@ -292,23 +307,19 @@ export default function App() {
     if (flipped.length === 2 || flipped.includes(idx) || solved.includes(idx)) return;
     const newFlipped = [...flipped, idx];
     setFlipped(newFlipped);
-
     if (newFlipped.length === 2) {
       const [first, second] = newFlipped;
       if (cards[first].icon === cards[second].icon) {
         const newSolved = [...solved, first, second];
         setSolved(newSolved);
         setFlipped([]);
-        if (newSolved.length === cards.length) {
-          awardPoints(25, 'Memory Master');
-        }
+        if (newSolved.length === cards.length) awardPoints(25, 'Memory Master');
       } else {
         setTimeout(() => setFlipped([]), 700);
       }
     }
   };
 
-  // 2. Speed Typer
   const initTyperGame = () => {
     setTargetWord(codeWords[Math.floor(Math.random() * codeWords.length)]);
     setTypedWord('');
@@ -327,7 +338,6 @@ export default function App() {
     }
   };
 
-  // 3. Tic-Tac-Toe
   const checkWinner = (sq) => {
     const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     for (let [a,b,c] of lines) {
@@ -347,14 +357,12 @@ export default function App() {
     const next = [...board];
     next[idx] = 'X';
     setBoard(next);
-
     const win = checkWinner(next);
     if (win) {
       if (win === 'X') awardPoints(30, 'Tic-Tac-Toe Win');
       setTttStatus(win === 'Draw' ? "It's a Draw!" : `${win} Wins!`);
       return;
     }
-
     setTttStatus('AI thinking...');
     setTimeout(() => {
       const empty = next.map((v, i) => v === null ? i : null).filter(v => v !== null);
@@ -363,16 +371,11 @@ export default function App() {
         next[aiMove] = 'O';
         setBoard([...next]);
         const aiWin = checkWinner(next);
-        if (aiWin) {
-          setTttStatus(aiWin === 'Draw' ? "It's a Draw!" : `${aiWin} Wins!`);
-        } else {
-          setTttStatus('Your turn (X)');
-        }
+        setTttStatus(aiWin ? (aiWin === 'Draw' ? "It's a Draw!" : `${aiWin} Wins!`) : 'Your turn (X)');
       }
     }, 350);
   };
 
-  // 4. Bug Squasher
   const initBugGame = () => {
     setBugsSquashed(0);
     setBugPos(Math.floor(Math.random() * 9));
@@ -386,9 +389,7 @@ export default function App() {
       let nextPos = Math.floor(Math.random() * 9);
       while (nextPos === bugPos) nextPos = Math.floor(Math.random() * 9);
       setBugPos(nextPos);
-      if (nextCount % 5 === 0) {
-        awardPoints(20, 'Bug Hunter');
-      }
+      if (nextCount % 5 === 0) awardPoints(20, 'Bug Hunter');
     }
   };
 
@@ -527,7 +528,6 @@ export default function App() {
 
             {!activeGame ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Game 1 Card */}
                 <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-pink-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
                   <Cpu className="w-12 h-12 text-pink-500 mb-3 animate-bounce" />
                   <h3 className="text-xl font-bold mb-1">Memory Match</h3>
@@ -537,7 +537,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Game 2 Card */}
                 <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-emerald-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
                   <Terminal className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
                   <h3 className="text-xl font-bold mb-1">Speed Typer</h3>
@@ -547,7 +546,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Game 3 Card */}
                 <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-indigo-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
                   <Grid className="w-12 h-12 text-indigo-400 mb-3" />
                   <h3 className="text-xl font-bold mb-1">Cyber Tic-Tac-Toe</h3>
@@ -557,7 +555,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Game 4 Card */}
                 <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-orange-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
                   <Bug className="w-12 h-12 text-orange-500 mb-3 animate-bounce" />
                   <h3 className="text-xl font-bold mb-1">Bug Squasher</h3>
@@ -569,7 +566,6 @@ export default function App() {
               </div>
             ) : (
               <div className="bg-[#12121a] p-6 md:p-8 rounded-2xl border border-white/10 max-w-lg mx-auto text-center animate-pop-in">
-                {/* PLAYABLE GAME 1: MEMORY MATCH */}
                 {activeGame === 'memory' && (
                   <div>
                     <h2 className="text-xl font-bold text-pink-400 mb-4">Memory Match</h2>
@@ -595,7 +591,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* PLAYABLE GAME 2: SPEED TYPER */}
                 {activeGame === 'typer' && (
                   <div>
                     <h2 className="text-xl font-bold text-emerald-400 mb-2">Mainframe Speed Typer</h2>
@@ -614,7 +609,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* PLAYABLE GAME 3: TIC TAC TOE */}
                 {activeGame === 'ttt' && (
                   <div>
                     <h2 className="text-xl font-bold text-indigo-400 mb-2">Cyber Tic-Tac-Toe</h2>
@@ -636,7 +630,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* PLAYABLE GAME 4: BUG SQUASHER */}
                 {activeGame === 'bug' && (
                   <div>
                     <h2 className="text-xl font-bold text-orange-400 mb-1">Bug Squasher</h2>
@@ -673,7 +666,7 @@ export default function App() {
                 className="bg-white/5 hover:bg-white/10 border border-white/10 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 text-gray-300 hover:text-white transition-all"
               >
                 <Key className="w-3.5 h-3.5 text-indigo-400" />
-                {customApiKey || import.meta.env.VITE_GEMINI_API_KEY ? 'API Key Active' : 'Set Gemini Key'}
+                {customApiKey || import.meta.env.VITE_GEMINI_API_KEY ? 'API Key Active' : '🔑 Set Gemini Key'}
               </button>
             </div>
             
@@ -684,6 +677,9 @@ export default function App() {
                     {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
                   </div>
                   <div className={`p-4 rounded-2xl max-w-[85%] md:max-w-[75%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                    {msg.image && (
+                      <img src={msg.image} alt="User upload" className="max-h-48 rounded-lg mb-2 border border-white/20 object-cover" />
+                    )}
                     <p className="text-sm md:text-base whitespace-pre-wrap">{msg.text}</p>
                   </div>
                 </div>
@@ -694,22 +690,50 @@ export default function App() {
                     <Sparkles className="w-4 h-4 text-white animate-spin" />
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is generating response...
+                    Aura is thinking...
                   </div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
+            {/* CHAT INPUT BAR WITH IMAGE ATTACHMENT */}
             <div className="p-4 md:p-6 border-t border-white/10 bg-[#0a0a0f]">
-              <form onSubmit={handleSendMessage} className="flex gap-2">
+              {selectedImage && (
+                <div className="flex items-center gap-3 mb-3 bg-[#12121a] p-2 rounded-lg border border-indigo-500/30 w-fit">
+                  <img src={selectedImage} alt="Preview" className="w-12 h-12 object-cover rounded" />
+                  <span className="text-xs text-gray-300">Image attached ready to send</span>
+                  <button onClick={() => setSelectedImage(null)} className="text-red-400 hover:text-red-300 p-1">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  ref={fileInputRef} 
+                  onChange={handleImageSelect} 
+                  className="hidden" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-[#12121a] hover:bg-white/10 border border-white/10 p-3 rounded-lg text-gray-400 hover:text-white transition-colors"
+                  title="Attach Screenshot or Image"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
+
                 <input 
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask Aura about React, JS, Python, or study tips..." 
+                  placeholder="Chat naturally with Aura or attach an image..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
+
                 <button 
                   type="submit" 
                   disabled={isAiLoading}
@@ -795,7 +819,6 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#050505] text-white overflow-hidden font-sans relative">
-      {/* CUSTOM KEYFRAME ANIMATIONS */}
       <style>{`
         @keyframes fadeInUp {
           from { opacity: 0; transform: translateY(12px); }
@@ -809,7 +832,6 @@ export default function App() {
         .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       `}</style>
 
-      {/* ANIMATED TOAST BANNER */}
       {toast && (
         <div className="fixed bottom-5 right-5 z-[200] bg-indigo-600 text-white px-4 py-3 rounded-xl shadow-2xl border border-indigo-400/40 flex items-center gap-2 text-sm font-semibold animate-pop-in">
           <Zap className="w-4 h-4 text-yellow-300" /> {toast}
@@ -831,7 +853,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* 2. MOBILE OVERLAY */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
       )}
@@ -914,7 +935,7 @@ export default function App() {
         {renderContent()}
       </div>
 
-      {/* --- ADD / EDIT SNIPPET MODAL (WITH ANIMATION) --- */}
+      {/* --- ADD / EDIT SNIPPET MODAL --- */}
       {showSnippetModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative animate-pop-in">
@@ -1034,7 +1055,7 @@ export default function App() {
                 <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="••••••••" required />
               </div>
               {loginError && <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg">{loginError}</div>}
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg text-sm font-bold transition-all">
+              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold transition-all">
                 Initialize Login
               </button>
             </form>
