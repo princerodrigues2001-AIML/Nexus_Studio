@@ -2,39 +2,49 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Sparkles, Terminal, Code, Cpu, Trophy, User, 
   LogIn, Lock, Menu, X, LogOut, Plus, Send, Play, 
-  CheckSquare, Briefcase 
+  CheckSquare, Briefcase, Trash2
 } from 'lucide-react';
 
 export default function App() {
-  // --- CORE SYSTEM STATES ---
-  // Forces the app to start safely in guest mode every time it loads
-  const [userRole, setUserRole] = useState('guest'); 
+  // --- PERSISTENT STATES (Saves data when you refresh) ---
+  const [userRole, setUserRole] = useState(() => localStorage.getItem('userRole') || 'guest'); 
+  const [mumuPoints, setMumuPoints] = useState(() => parseInt(localStorage.getItem('mumuPoints')) || 0);
+  const [snippets, setSnippets] = useState(() => {
+    const saved = localStorage.getItem('snippets');
+    return saved ? JSON.parse(saved) : [
+      { id: 1, title: 'Center A Div', code: 'display: flex;\njustify-content: center;\nalign-items: center;' }
+    ];
+  });
+
+  // --- UI STATES ---
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('snippetHub');
   const [showLogin, setShowLogin] = useState(false);
-  const [mumuPoints, setMumuPoints] = useState(() => {
-    return parseInt(localStorage.getItem('mumuPoints')) || 0;
-  });
-
+  
   // --- LOGIN STATES ---
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // Save points to local storage
-  useEffect(() => {
-    localStorage.setItem('mumuPoints', mumuPoints);
-  }, [mumuPoints]);
+  // --- AI CHAT STATES ---
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    { sender: 'aura', text: 'Hello Prince! I am Aura. How can I help you code today?' }
+  ]);
+
+  // --- SAVE TO BROWSER MEMORY ---
+  useEffect(() => localStorage.setItem('userRole', userRole), [userRole]);
+  useEffect(() => localStorage.setItem('mumuPoints', mumuPoints), [mumuPoints]);
+  useEffect(() => localStorage.setItem('snippets', JSON.stringify(snippets)), [snippets]);
 
   // --- HANDLERS ---
   const handleNavigation = (tab) => {
-    // Lock out guests from restricted areas
     if (userRole === 'guest' && tab !== 'snippetHub' && tab !== 'arcadeLounge') {
       setShowLogin(true);
       return;
     }
     setActiveTab(tab);
-    setIsMobileMenuOpen(false); // Bug fix: Auto-closes mobile menu on tap
+    setIsMobileMenuOpen(false);
   };
 
   const handleLogin = (e) => {
@@ -60,6 +70,41 @@ export default function App() {
     setMumuPoints((prev) => prev + amount);
   };
 
+  // --- SNIPPET LOGIC ---
+  const handleAddSnippet = () => {
+    const title = prompt("Enter Snippet Title:");
+    const code = prompt("Enter Code:");
+    if (title && code) {
+      const newSnippet = { id: Date.now(), title, code };
+      setSnippets([...snippets, newSnippet]);
+    }
+  };
+
+  const handleDeleteSnippet = (id) => {
+    if (confirm("Delete this snippet?")) {
+      setSnippets(snippets.filter(s => s.id !== id));
+    }
+  };
+
+  // --- AI CHAT LOGIC ---
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    // Add user message to screen
+    const newHistory = [...chatHistory, { sender: 'user', text: chatInput }];
+    setChatHistory(newHistory);
+    setChatInput('');
+
+    // Simulate Aura thinking, then replying
+    setTimeout(() => {
+      setChatHistory([...newHistory, { 
+        sender: 'aura', 
+        text: 'I received your message! (To make me super smart, we will connect the Gemini API key next).' 
+      }]);
+    }, 1000);
+  };
+
   // --- PAGE CONTENT RENDERER ---
   const renderContent = () => {
     switch (activeTab) {
@@ -72,21 +117,29 @@ export default function App() {
                 <p className="text-gray-400 text-sm md:text-base">Public library of quick code utilities.</p>
               </div>
               {userRole === 'admin' && (
-                <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 md:px-4 rounded flex items-center gap-2 text-sm">
+                <button onClick={handleAddSnippet} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 md:px-4 rounded flex items-center gap-2 text-sm">
                   <Plus className="w-4 h-4" /> <span className="hidden md:inline">Add Snippet</span>
                 </button>
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div className="bg-[#12121a] p-6 rounded-lg border border-white/10 hover:border-indigo-500/50 transition-colors">
-                <div className="flex justify-between items-start mb-4">
-                  <h3 className="font-bold text-indigo-400">Center A Div</h3>
-                  <Code className="w-5 h-5 text-gray-500" />
+              {snippets.map((snippet) => (
+                <div key={snippet.id} className="bg-[#12121a] p-6 rounded-lg border border-white/10 hover:border-indigo-500/50 transition-colors relative">
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="font-bold text-indigo-400">{snippet.title}</h3>
+                    {userRole === 'admin' ? (
+                      <button onClick={() => handleDeleteSnippet(snippet.id)} className="text-gray-500 hover:text-red-400">
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <Code className="w-5 h-5 text-gray-500" />
+                    )}
+                  </div>
+                  <pre className="bg-[#050505] p-4 rounded text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {snippet.code}
+                  </pre>
                 </div>
-                <pre className="bg-[#050505] p-4 rounded text-sm text-gray-300 overflow-x-auto">
-                  {`display: flex;\njustify-content: center;\nalign-items: center;`}
-                </pre>
-              </div>
+              ))}
             </div>
           </div>
         );
@@ -100,10 +153,7 @@ export default function App() {
               <div className="bg-[#12121a] p-6 rounded-lg border border-white/10 flex flex-col items-center text-center">
                 <Cpu className="w-12 h-12 text-pink-500 mb-4" />
                 <h3 className="text-xl font-bold mb-2">Memory Match</h3>
-                <button 
-                  onClick={() => awardPoints(10)}
-                  className="mt-4 bg-pink-600/20 text-pink-500 hover:bg-pink-600 hover:text-white px-6 py-2 rounded-full transition-all"
-                >
+                <button onClick={() => awardPoints(10)} className="mt-4 bg-pink-600/20 text-pink-500 hover:bg-pink-600 hover:text-white px-6 py-2 rounded-full transition-all">
                   Play (+10 MuMu)
                 </button>
               </div>
@@ -119,27 +169,35 @@ export default function App() {
                 <Sparkles className="w-6 h-6" /> Aura AI Tutor
               </h1>
             </div>
+            
+            {/* Chat History Area */}
             <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
-                  <Sparkles className="w-4 h-4 text-white" />
+              {chatHistory.map((msg, idx) => (
+                <div key={idx} className={`flex gap-4 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.sender === 'user' ? 'bg-gray-600' : 'bg-indigo-600'}`}>
+                    {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
+                  </div>
+                  <div className={`p-4 rounded-2xl max-w-[85%] md:max-w-[80%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                    <p className="text-sm md:text-base">{msg.text}</p>
+                  </div>
                 </div>
-                <div className="bg-[#12121a] p-4 rounded-2xl rounded-tl-none border border-white/10 max-w-[85%] md:max-w-[80%]">
-                  <p className="text-sm md:text-base">Hello Prince! I am Aura. My AI connection is currently awaiting the Vercel API Key injection.</p>
-                </div>
-              </div>
+              ))}
             </div>
+
+            {/* Chat Input Box */}
             <div className="p-4 md:p-6 border-t border-white/10 bg-[#0a0a0f]">
-              <div className="flex gap-2">
+              <form onSubmit={handleSendMessage} className="flex gap-2">
                 <input 
                   type="text" 
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Ask Aura anything..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
-                <button className="bg-indigo-600 hover:bg-indigo-700 p-3 rounded-lg transition-colors shrink-0">
+                <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 p-3 rounded-lg transition-colors shrink-0">
                   <Send className="w-5 h-5 text-white" />
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         );
@@ -185,21 +243,15 @@ export default function App() {
           <div className="bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1">
             <Trophy className="w-3 h-3" /> {mumuPoints}
           </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
-            className="p-1 text-white hover:text-indigo-400"
-          >
+          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-1 text-white hover:text-indigo-400">
             {isMobileMenuOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
           </button>
         </div>
       </div>
 
-      {/* 2. MOBILE MENU OVERLAY (Clicks to close) */}
+      {/* 2. MOBILE MENU OVERLAY */}
       {isMobileMenuOpen && (
-        <div 
-          className="md:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" 
-          onClick={() => setIsMobileMenuOpen(false)} 
-        />
+        <div className="md:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
       )}
 
       {/* 3. RESPONSIVE SIDEBAR */}
@@ -257,10 +309,7 @@ export default function App() {
           </div>
 
           {userRole === 'guest' ? (
-            <button 
-              onClick={() => { setShowLogin(true); setIsMobileMenuOpen(false); }}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg transition-colors text-sm font-bold shadow-lg shadow-indigo-600/20"
-            >
+            <button onClick={() => { setShowLogin(true); setIsMobileMenuOpen(false); }} className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg transition-colors text-sm font-bold shadow-lg shadow-indigo-600/20">
               <LogIn className="w-4 h-4" /> System Login
             </button>
           ) : (
@@ -283,7 +332,6 @@ export default function App() {
       </div>
 
       {/* 4. MAIN CONTENT AREA */}
-      {/* Bug fix: pt-16 prevents the mobile header from covering your content */}
       <div className="flex-1 flex flex-col pt-16 md:pt-0 overflow-y-auto overflow-x-hidden relative bg-[#050505]">
         {renderContent()}
       </div>
@@ -292,10 +340,7 @@ export default function App() {
       {showLogin && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
-            <button 
-              onClick={() => setShowLogin(false)}
-              className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-            >
+            <button onClick={() => setShowLogin(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
               <X className="w-6 h-6" />
             </button>
             <div className="text-center mb-8 mt-2">
@@ -303,48 +348,22 @@ export default function App() {
                 <Shield className="w-8 h-8 text-indigo-500" />
               </div>
               <h2 className="text-2xl font-bold text-white">Secure Access</h2>
-              <p className="text-gray-400 text-sm mt-2">Authenticate to unlock restricted tools.</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Email</label>
-                <input 
-                  type="email" 
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
-                  placeholder="admin@nexus.com"
-                  required
-                />
+                <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="admin@nexus.com" required />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Password</label>
-                <input 
-                  type="password" 
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
-                  placeholder="••••••••"
-                  required
-                />
+                <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="••••••••" required />
               </div>
-              {loginError && (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg font-medium">
-                  {loginError}
-                </div>
-              )}
-              <button 
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold mt-2 transition-colors shadow-lg shadow-indigo-600/20"
-              >
+              {loginError && <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg font-medium">{loginError}</div>}
+              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold mt-2 transition-colors shadow-lg shadow-indigo-600/20">
                 Initialize Login
               </button>
             </form>
-            
-            <div className="mt-6 text-center text-xs text-gray-600 font-mono bg-white/5 py-2 rounded">
-              Dev Test: admin@nexus.com / admin123
-            </div>
           </div>
         </div>
       )}
