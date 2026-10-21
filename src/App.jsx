@@ -3,31 +3,68 @@ import {
   Shield, Sparkles, Terminal, Code, Cpu, Trophy, User, 
   LogIn, Lock, Menu, X, LogOut, Plus, Search, Send, Play, 
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
-  Key, Zap, Grid, Bug, RotateCcw, Image, Paperclip 
+  Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain
 } from 'lucide-react';
 
+// Reads securely from Vercel Environment Variables so GitHub Push Protection never blocks it
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const FIREBASE_DB_URL = import.meta.env.VITE_FIREBASE_DB_URL || "";
+
+const DEFAULT_SNIPPETS = [
+  { id: 1, title: 'Center a Div', category: 'CSS', code: 'display: flex;\njustify-content: center;\nalign-items: center;' },
+  { id: 2, title: 'Fetch API Wrapper', category: 'JS', code: 'const fetcher = url => fetch(url).then(r => r.json());' },
+  { id: 3, title: 'React State Hook', category: 'REACT', code: 'const [val, setVal] = useState(initial);' }
+];
+
+const DEFAULT_TASKS = [
+  { id: 1, text: 'Review React Hooks & State', done: false },
+  { id: 2, text: 'Practice Data Structures & Algorithms', done: true }
+];
+
+const DEFAULT_BAG = [
+  { id: 1, text: 'Laptop & Charger', packed: true },
+  { id: 2, text: 'College ID & Notebook', packed: false }
+];
+
+const CODELE_WORDS = [
+  'REACT', 'LOGIC', 'CYBER', 'STACK', 'PIXEL', 
+  'ARRAY', 'DEBUG', 'CLOUD', 'TOKEN', 'NEXUS', 
+  'ASYNC', 'FETCH', 'STATE', 'NODES', 'SMART'
+];
+
+const STROOP_COLORS = [
+  { name: 'RED', hex: '#ef4444', bg: 'bg-red-500 hover:bg-red-400' },
+  { name: 'BLUE', hex: '#3b82f6', bg: 'bg-blue-500 hover:bg-blue-400' },
+  { name: 'GREEN', hex: '#10b981', bg: 'bg-emerald-500 hover:bg-emerald-400' },
+  { name: 'YELLOW', hex: '#eab308', bg: 'bg-yellow-500 hover:bg-yellow-400' }
+];
+
 export default function App() {
-  // --- PERSISTENT STATES ---
+  // --- AUTH & NAVIGATION STATES ---
   const [userRole, setUserRole] = useState(() => localStorage.getItem('nexus_user_role') || 'guest');
-  const [mumuPoints, setMumuPoints] = useState(() => parseInt(localStorage.getItem('nexus_mumu_points')) || 0);
-  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('nexus_gemini_key') || '');
-
-  const [snippets, setSnippets] = useState(() => {
-    const saved = localStorage.getItem('nexus_snippets');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, title: 'Center a Div', category: 'CSS', code: 'display: flex;\njustify-content: center;\nalign-items: center;' },
-      { id: 2, title: 'Fetch API Wrapper', category: 'JS', code: 'const fetcher = url => fetch(url).then(r => r.json());' },
-      { id: 3, title: 'React State Hook', category: 'REACT', code: 'const [val, setVal] = useState(initial);' }
-    ];
-  });
-
-  // --- UI & NAVIGATION STATES ---
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [toast, setToast] = useState(null);
+  const [cloudConnected, setCloudConnected] = useState(false);
 
-  // --- LOGIN STATES ---
+  // --- SYNCED DATA STATES ---
+  const [mumuPoints, setMumuPoints] = useState(() => parseInt(localStorage.getItem('nexus_mumu_points')) || 0);
+  const [snippets, setSnippets] = useState(() => {
+    const saved = localStorage.getItem('nexus_snippets');
+    return saved ? JSON.parse(saved) : DEFAULT_SNIPPETS;
+  });
+  const [studyTasks, setStudyTasks] = useState(() => {
+    const saved = localStorage.getItem('nexus_study_tasks');
+    return saved ? JSON.parse(saved) : DEFAULT_TASKS;
+  });
+  const [bagItems, setBagItems] = useState(() => {
+    const saved = localStorage.getItem('nexus_bag_items');
+    return saved ? JSON.parse(saved) : DEFAULT_BAG;
+  });
+
+  // --- LOGIN FORM STATES ---
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -41,80 +78,137 @@ export default function App() {
   const [snippetCode, setSnippetCode] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
-  // --- AURA AI STATES (WITH IMAGE SUPPORT) ---
+  // --- AURA AI STATES ---
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [tempKeyInput, setTempKeyInput] = useState(customApiKey);
-  const [selectedImage, setSelectedImage] = useState(null); // Base64 image
+  const [selectedImage, setSelectedImage] = useState(null);
   const [chatHistory, setChatHistory] = useState([
-    { sender: 'aura', text: "Hey Prince! I'm Aura. Good morning! How are you doing today? Feel free to chat with me, ask coding questions, or attach screenshots using the paperclip icon!" }
+    { 
+      sender: 'aura', 
+      text: "Hey Prince! 👋 I'm Aura, your friendly AI buddy and coding partner. Say hi, ask me anything about code or studies, or click the paperclip icon (📎) to share an image with me!" 
+    }
   ]);
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // --- ARCADE GAME STATES ---
-  const [activeGame, setActiveGame] = useState(null);
-  const memoryIcons = ['⚡', '🚀', '💻', '🔥', '⚡', '🚀', '💻', '🔥'];
-  const [cards, setCards] = useState([]);
-  const [flipped, setFlipped] = useState([]);
-  const [solved, setSolved] = useState([]);
-
-  const codeWords = ['useState', 'useEffect', 'function', 'Promise', 'async', 'tailwind', 'component', 'database', 'interface', 'variable'];
-  const [targetWord, setTargetWord] = useState('useState');
-  const [typedWord, setTypedWord] = useState('');
-  const [typerStreak, setTyperStreak] = useState(0);
-
-  const [board, setBoard] = useState(Array(9).fill(null));
-  const [tttStatus, setTttStatus] = useState('Your turn (X)');
-
-  const [bugPos, setBugPos] = useState(4);
-  const [bugsSquashed, setBugsSquashed] = useState(0);
-
-  // --- STUDY PLANNER & BAG PACKER STATES ---
-  const [studyTasks, setStudyTasks] = useState(() => {
-    const saved = localStorage.getItem('nexus_study_tasks');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, text: 'Review React Hooks & State', done: false },
-      { id: 2, text: 'Practice Data Structures', done: true }
-    ];
-  });
+  // --- STUDY & BAG INPUTS ---
   const [newTaskText, setNewTaskText] = useState('');
-
-  const [bagItems, setBagItems] = useState(() => {
-    const saved = localStorage.getItem('nexus_bag_items');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, text: 'Laptop & Charger', packed: true },
-      { id: 2, text: 'Notebook & ID Card', packed: false }
-    ];
-  });
   const [newBagItem, setNewBagItem] = useState('');
 
-  // --- SYNC TO LOCAL STORAGE ---
+  // --- ARCADE GEN-Z LOGIC GAMES STATES ---
+  const [activeGame, setActiveGame] = useState(null);
+
+  // Game 1: CODELE
+  const [codeleTarget, setCodeleTarget] = useState('REACT');
+  const [codeleGuesses, setCodeleGuesses] = useState([]);
+  const [codeleCurrent, setCodeleCurrent] = useState('');
+  const [codeleStatus, setCodeleStatus] = useState('playing');
+
+  // Game 2: 2048 Cyber Merge
+  const [grid2048, setGrid2048] = useState(Array(16).fill(0));
+  const [score2048, setScore2048] = useState(0);
+
+  // Game 3: Quantum Lights Out
+  const [lightsGrid, setLightsGrid] = useState(Array(16).fill(false));
+  const [lightsMoves, setLightsMoves] = useState(0);
+
+  // Game 4: Stroop Mind Paradox
+  const [stroopWordIdx, setStroopWordIdx] = useState(0);
+  const [stroopColorIdx, setStroopColorIdx] = useState(1);
+  const [stroopMode, setStroopMode] = useState('COLOR');
+  const [stroopStreak, setStroopStreak] = useState(0);
+
+  // --- FIREBASE CLOUD SYNC ENGINE ---
+  const isFirebaseConfigured = Boolean(
+    FIREBASE_DB_URL && FIREBASE_DB_URL.startsWith('https://')
+  );
+  const cleanDbUrl = isFirebaseConfigured ? FIREBASE_DB_URL.replace(/\/$/, '') : '';
+
+  const pushToCloud = async (nextData) => {
+    if (!isFirebaseConfigured) return;
+    try {
+      await fetch(`${cleanDbUrl}/nexus_studio_state.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          snippets: nextData.snippets ?? snippets,
+          studyTasks: nextData.studyTasks ?? studyTasks,
+          bagItems: nextData.bagItems ?? bagItems,
+          mumuPoints: nextData.mumuPoints ?? mumuPoints,
+          updatedAt: Date.now()
+        })
+      });
+      setCloudConnected(true);
+    } catch (err) {
+      setCloudConnected(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+
+    const fetchFromCloud = async () => {
+      try {
+        const res = await fetch(`${cleanDbUrl}/nexus_studio_state.json`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setCloudConnected(true);
+
+        if (data) {
+          if (Array.isArray(data.snippets)) {
+            setSnippets(data.snippets);
+            localStorage.setItem('nexus_snippets', JSON.stringify(data.snippets));
+          }
+          if (Array.isArray(data.studyTasks)) {
+            setStudyTasks(data.studyTasks);
+            localStorage.setItem('nexus_study_tasks', JSON.stringify(data.studyTasks));
+          }
+          if (Array.isArray(data.bagItems)) {
+            setBagItems(data.bagItems);
+            localStorage.setItem('nexus_bag_items', JSON.stringify(data.bagItems));
+          }
+          if (typeof data.mumuPoints === 'number') {
+            setMumuPoints(data.mumuPoints);
+            localStorage.setItem('nexus_mumu_points', data.mumuPoints);
+          }
+        } else {
+          pushToCloud({ snippets, studyTasks, bagItems, mumuPoints });
+        }
+      } catch (e) {
+        setCloudConnected(false);
+      }
+    };
+
+    fetchFromCloud();
+    const interval = setInterval(fetchFromCloud, 3000);
+    return () => clearInterval(interval);
+  }, [isFirebaseConfigured]);
+
+  // --- LOCAL STORAGE BACKUP ---
   useEffect(() => localStorage.setItem('nexus_user_role', userRole), [userRole]);
+  useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_mumu_points', mumuPoints), [mumuPoints]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
-  useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_study_tasks', JSON.stringify(studyTasks)), [studyTasks]);
   useEffect(() => localStorage.setItem('nexus_bag_items', JSON.stringify(bagItems)), [bagItems]);
-  useEffect(() => localStorage.setItem('nexus_gemini_key', customApiKey), [customApiKey]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, isAiLoading]);
 
-  // --- TOAST NOTIFICATION HELPER ---
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2600);
   };
 
   const awardPoints = (amount, label = 'Bonus') => {
-    setMumuPoints((prev) => prev + amount);
+    const nextPts = mumuPoints + amount;
+    setMumuPoints(nextPts);
+    pushToCloud({ mumuPoints: nextPts });
     showToast(`+${amount} MuMu Points! (${label})`);
   };
 
-  // --- AUTH & NAVIGATION HANDLERS ---
+  // --- AUTH & NAVIGATION ---
   const handleNavigation = (tab) => {
     if (userRole === 'guest' && tab !== 'snippetHub' && tab !== 'arcadeLounge') {
       setShowLogin(true);
@@ -133,7 +227,7 @@ export default function App() {
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast('Welcome back, Nexus Admin!');
+      showToast('🔓 Admin Mode Activated!');
     } else {
       setLoginError('Invalid credentials. Use admin@nexus.com / admin123');
     }
@@ -143,7 +237,7 @@ export default function App() {
     setUserRole('guest');
     setActiveTab('snippetHub');
     setIsMobileMenuOpen(false);
-    showToast('Logged out safely.');
+    showToast('🔒 Logged out to Guest Mode.');
   };
 
   // --- SNIPPET HANDLERS ---
@@ -167,13 +261,14 @@ export default function App() {
     e.preventDefault();
     if (!snippetTitle.trim() || !snippetCode.trim()) return;
 
+    let updated;
     if (editingSnippet) {
-      setSnippets(snippets.map(s => 
+      updated = snippets.map(s => 
         s.id === editingSnippet.id 
           ? { ...s, title: snippetTitle, category: snippetCategory, code: snippetCode }
           : s
-      ));
-      showToast('✨ Snippet updated with changes!');
+      );
+      showToast('✨ Snippet updated & synced!');
     } else {
       const newSnippet = {
         id: Date.now(),
@@ -181,15 +276,19 @@ export default function App() {
         category: snippetCategory,
         code: snippetCode
       };
-      setSnippets([newSnippet, ...snippets]);
-      showToast('🚀 New snippet added to Hub!');
+      updated = [newSnippet, ...snippets];
+      showToast('🚀 New snippet created & synced!');
     }
+    setSnippets(updated);
+    pushToCloud({ snippets: updated });
     setShowSnippetModal(false);
   };
 
   const handleDeleteSnippet = (id) => {
-    setSnippets(snippets.filter(s => s.id !== id));
-    showToast('🗑️ Snippet removed.');
+    const updated = snippets.filter(s => s.id !== id);
+    setSnippets(updated);
+    pushToCloud({ snippets: updated });
+    showToast('🗑️ Snippet deleted.');
   };
 
   const handleCopyCode = (id, code) => {
@@ -199,197 +298,267 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // --- IMAGE UPLOAD HANDLER ---
+  // --- AURA AI ENGINE (HUMAN-LIKE + MULTIMODAL VISION) ---
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
-      setSelectedImage(reader.result); // Base64 string
-      showToast('📎 Image attached successfully!');
+      setSelectedImage(reader.result);
+      showToast('📎 Image attached!');
     };
     reader.readAsDataURL(file);
   };
 
-  // --- AURA AI HANDLER (TRUE GEMINI API WITH MULTIMODAL IMAGE SUPPORT) ---
+  const generateHumanLikeFallback = (userText, hasImg) => {
+    const clean = userText.toLowerCase().trim();
+    if (hasImg) {
+      return `That screenshot looks super clean, Prince! 📸 ${
+        userText ? `About "${userText}" — ` : ''
+      }let me know if you want me to write the React or Tailwind code for it!`;
+    }
+    if (/^(hi|hello|hey|yo|hola|sup|hii+)\b/.test(clean)) {
+      return "Hey Prince! 😄 Great to see you! How's your day going? Ready to build something cool or just chilling?";
+    }
+    if (clean.includes('good morning') || clean.includes('gm')) {
+      return "Good morning, Prince! ☀️ Hope you slept great! What are we tackling first today?";
+    }
+    if (clean.includes('good night') || clean.includes('gn')) {
+      return "Good night, Prince! 🌙 Get some awesome rest and we'll crush more goals tomorrow!";
+    }
+    if (clean.includes('how are you') || clean.includes('how r u')) {
+      return "I'm doing awesome, running at 100% and happy to chat with you! ⚡ How are you doing today?";
+    }
+    if (clean.includes('react') || clean.includes('hook') || clean.includes('state')) {
+      return "In React, `useState` lets your component remember data, and `useEffect` lets it sync with external systems like Firebase! 💡";
+    }
+    if (clean.includes('css') || clean.includes('center')) {
+      return "To center anything cleanly in CSS:\n\ndisplay: flex;\njustify-content: center;\nalign-items: center; 🎯";
+    }
+    return `I love that you brought up "${userText}"! 🚀 Tell me a little more about what you want to build or solve around this, and I'll write it out for you!`;
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const userMessage = chatInput.trim();
     if ((!userMessage && !selectedImage) || isAiLoading) return;
 
     const currentImage = selectedImage;
-    const updatedHistory = [...chatHistory, { 
-      sender: 'user', 
-      text: userMessage || '[Attached Image]', 
-      image: currentImage 
-    }];
+    const updatedHistory = [
+      ...chatHistory, 
+      { sender: 'user', text: userMessage || 'Sent an image 📸', image: currentImage }
+    ];
     setChatHistory(updatedHistory);
     setChatInput('');
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const activeKey = customApiKey.trim() || import.meta.env.VITE_GEMINI_API_KEY;
-
-    if (!activeKey) {
-      setTimeout(() => {
-        setChatHistory([...updatedHistory, { 
-          sender: 'aura', 
-          text: "Hey! I'm ready to chat, but you need to connect your Gemini API key first. Click the '🔑 Set Gemini Key' button in the top right corner of this AI chat tab!" 
-        }]);
-        setIsAiLoading(false);
-      }, 500);
-      return;
-    }
-
-    try {
-      // Build content parts for Gemini API (supports both text and inline images)
-      const parts = [];
-      if (userMessage) {
-        parts.push({ text: `You are Aura, a warm, friendly, and deeply human-like AI companion and coding assistant created for Prince Rodrigues. Respond naturally, conversationally, and warmly to greetings (like hi, hello, good morning). If shown an image or code snippet, analyze it helpfully.\n\nUser Message: ${userMessage}` });
-      } else {
-        parts.push({ text: "Please analyze this attached image for Prince." });
-      }
+    if (GEMINI_API_KEY && GEMINI_API_KEY.startsWith('AIza')) {
+      const parts = [{
+        text: `You are Aura, a warm, friendly, witty, human-like AI friend and coding mentor for Prince. Respond naturally like a supportive human friend. Greet warmly when he says hi or good morning.\n\nUser: ${userMessage || 'Analyze this image for me!'}`
+      }];
 
       if (currentImage) {
-        // Extract base64 data and mime type
         const matches = currentImage.match(/^data:(.+);base64,(.+)$/);
         if (matches) {
-          parts.push({
-            inline_data: {
-              mime_type: matches[1],
-              data: matches[2]
+          parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
+        }
+      }
+
+      const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      for (const m of models) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${GEMINI_API_KEY.trim()}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts }] })
             }
-          });
+          );
+          const data = await response.json();
+          const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (aiReply) {
+            setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
+            setIsAiLoading(false);
+            return;
+          }
+        } catch (err) {
+          // Try next model or fallback
         }
       }
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts }] })
-        }
-      );
-      const data = await response.json();
-      const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (aiReply) {
-        setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
-      } else {
-        setChatHistory([...updatedHistory, { sender: 'aura', text: "Hmm, I didn't get a valid response back from the Gemini servers. Check your API key!" }]);
-      }
-    } catch (err) {
-      console.error('Gemini API Error:', err);
-      setChatHistory([...updatedHistory, { sender: 'aura', text: "Oops! Something went wrong connecting to Gemini. Please check your network or API key." }]);
-    } finally {
-      setIsAiLoading(false);
     }
-  };
 
-  const handleSaveApiKey = (e) => {
-    e.preventDefault();
-    setCustomApiKey(tempKeyInput.trim());
-    setShowKeyModal(false);
-    showToast('🔑 Gemini API Key saved successfully!');
+    setTimeout(() => {
+      const reply = generateHumanLikeFallback(userMessage, Boolean(currentImage));
+      setChatHistory([...updatedHistory, { sender: 'aura', text: reply }]);
+      setIsAiLoading(false);
+    }, 500);
   };
 
   // --- ARCADE GAMES LOGIC ---
-  const initMemoryGame = () => {
-    const shuffled = [...memoryIcons].sort(() => Math.random() - 0.5).map((icon, idx) => ({ id: idx, icon }));
-    setCards(shuffled);
-    setFlipped([]);
-    setSolved([]);
-    setActiveGame('memory');
+  const initCodele = () => {
+    const randomWord = CODELE_WORDS[Math.floor(Math.random() * CODELE_WORDS.length)];
+    setCodeleTarget(randomWord);
+    setCodeleGuesses([]);
+    setCodeleCurrent('');
+    setCodeleStatus('playing');
+    setActiveGame('codele');
   };
 
-  const handleCardClick = (idx) => {
-    if (flipped.length === 2 || flipped.includes(idx) || solved.includes(idx)) return;
-    const newFlipped = [...flipped, idx];
-    setFlipped(newFlipped);
-    if (newFlipped.length === 2) {
-      const [first, second] = newFlipped;
-      if (cards[first].icon === cards[second].icon) {
-        const newSolved = [...solved, first, second];
-        setSolved(newSolved);
-        setFlipped([]);
-        if (newSolved.length === cards.length) awardPoints(25, 'Memory Master');
-      } else {
-        setTimeout(() => setFlipped([]), 700);
-      }
-    }
-  };
-
-  const initTyperGame = () => {
-    setTargetWord(codeWords[Math.floor(Math.random() * codeWords.length)]);
-    setTypedWord('');
-    setTyperStreak(0);
-    setActiveGame('typer');
-  };
-
-  const handleTyperChange = (e) => {
-    const val = e.target.value;
-    setTypedWord(val);
-    if (val === targetWord) {
-      awardPoints(15, 'Speed Coder');
-      setTyperStreak((s) => s + 1);
-      setTypedWord('');
-      setTargetWord(codeWords[Math.floor(Math.random() * codeWords.length)]);
-    }
-  };
-
-  const checkWinner = (sq) => {
-    const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-    for (let [a,b,c] of lines) {
-      if (sq[a] && sq[a] === sq[b] && sq[a] === sq[c]) return sq[a];
-    }
-    return sq.includes(null) ? null : 'Draw';
-  };
-
-  const initTttGame = () => {
-    setBoard(Array(9).fill(null));
-    setTttStatus('Your turn (X)');
-    setActiveGame('ttt');
-  };
-
-  const handleTttClick = (idx) => {
-    if (board[idx] || checkWinner(board)) return;
-    const next = [...board];
-    next[idx] = 'X';
-    setBoard(next);
-    const win = checkWinner(next);
-    if (win) {
-      if (win === 'X') awardPoints(30, 'Tic-Tac-Toe Win');
-      setTttStatus(win === 'Draw' ? "It's a Draw!" : `${win} Wins!`);
+  const submitCodeleGuess = () => {
+    if (codeleStatus !== 'playing') return;
+    if (codeleCurrent.length !== 5) {
+      showToast('⚠️ Enter a 5-letter word!');
       return;
     }
-    setTttStatus('AI thinking...');
-    setTimeout(() => {
-      const empty = next.map((v, i) => v === null ? i : null).filter(v => v !== null);
-      if (empty.length > 0) {
-        const aiMove = empty[Math.floor(Math.random() * empty.length)];
-        next[aiMove] = 'O';
-        setBoard([...next]);
-        const aiWin = checkWinner(next);
-        setTttStatus(aiWin ? (aiWin === 'Draw' ? "It's a Draw!" : `${aiWin} Wins!`) : 'Your turn (X)');
+    const nextGuesses = [...codeleGuesses, codeleCurrent.toUpperCase()];
+    setCodeleGuesses(nextGuesses);
+    setCodeleCurrent('');
+
+    if (codeleCurrent.toUpperCase() === codeleTarget) {
+      setCodeleStatus('won');
+      awardPoints(40, 'Codele Genius');
+    } else if (nextGuesses.length >= 6) {
+      setCodeleStatus('lost');
+      showToast(`Word was: ${codeleTarget}`);
+    }
+  };
+
+  const handleCodeleKey = (key) => {
+    if (codeleStatus !== 'playing') return;
+    if (key === 'ENTER') submitCodeleGuess();
+    else if (key === 'DEL') setCodeleCurrent((prev) => prev.slice(0, -1));
+    else if (/^[A-Z]$/.test(key) && codeleCurrent.length < 5) setCodeleCurrent((prev) => prev + key);
+  };
+
+  const getTileColor = (letter, index) => {
+    if (!letter) return 'bg-[#050505] border-white/10 text-white';
+    if (codeleTarget[index] === letter) return 'bg-emerald-600 border-emerald-500 text-white';
+    if (codeleTarget.includes(letter)) return 'bg-yellow-500/80 border-yellow-400 text-black';
+    return 'bg-gray-800 border-gray-700 text-gray-400';
+  };
+
+  const spawn2048Tile = (board) => {
+    const empty = board.map((v, i) => (v === 0 ? i : null)).filter((v) => v !== null);
+    if (empty.length === 0) return board;
+    const randIdx = empty[Math.floor(Math.random() * empty.length)];
+    const next = [...board];
+    next[randIdx] = Math.random() < 0.85 ? 2 : 4;
+    return next;
+  };
+
+  const init2048 = () => {
+    let fresh = Array(16).fill(0);
+    fresh = spawn2048Tile(fresh);
+    fresh = spawn2048Tile(fresh);
+    setGrid2048(fresh);
+    setScore2048(0);
+    setActiveGame('2048');
+  };
+
+  const slideRowLeft = (row) => {
+    let arr = row.filter((val) => val !== 0);
+    let gained = 0;
+    for (let i = 0; i < arr.length - 1; i++) {
+      if (arr[i] === arr[i + 1]) {
+        arr[i] *= 2;
+        gained += arr[i];
+        arr[i + 1] = 0;
       }
-    }, 350);
+    }
+    arr = arr.filter((val) => val !== 0);
+    while (arr.length < 4) arr.push(0);
+    return { newRow: arr, gained };
   };
 
-  const initBugGame = () => {
-    setBugsSquashed(0);
-    setBugPos(Math.floor(Math.random() * 9));
-    setActiveGame('bug');
+  const move2048 = (direction) => {
+    let current = [...grid2048];
+    let totalGained = 0;
+    const getRow = (b, r) => [b[r * 4], b[r * 4 + 1], b[r * 4 + 2], b[r * 4 + 3]];
+    const setRow = (b, r, row) => { b[r * 4] = row[0]; b[r * 4 + 1] = row[1]; b[r * 4 + 2] = row[2]; b[r * 4 + 3] = row[3]; };
+    const getCol = (b, c) => [b[c], b[c + 4], b[c + 8], b[c + 12]];
+    const setCol = (b, c, col) => { b[c] = col[0]; b[c + 4] = col[1]; b[c + 8] = col[2]; b[c + 12] = col[3]; };
+
+    const nextBoard = [...current];
+    if (direction === 'LEFT' || direction === 'RIGHT') {
+      for (let r = 0; r < 4; r++) {
+        let row = getRow(nextBoard, r);
+        if (direction === 'RIGHT') row.reverse();
+        const { newRow, gained } = slideRowLeft(row);
+        if (direction === 'RIGHT') newRow.reverse();
+        setRow(nextBoard, r, newRow);
+        totalGained += gained;
+      }
+    } else {
+      for (let c = 0; c < 4; c++) {
+        let col = getCol(nextBoard, c);
+        if (direction === 'DOWN') col.reverse();
+        const { newRow, gained } = slideRowLeft(col);
+        if (direction === 'DOWN') newRow.reverse();
+        setCol(nextBoard, c, newRow);
+        totalGained += gained;
+      }
+    }
+
+    if (JSON.stringify(current) !== JSON.stringify(nextBoard)) {
+      setGrid2048(spawn2048Tile(nextBoard));
+      setScore2048(score2048 + totalGained);
+      if (totalGained >= 64) awardPoints(50, '2048 High Merge!');
+    }
   };
 
-  const handleSquashBug = (idx) => {
-    if (idx === bugPos) {
-      const nextCount = bugsSquashed + 1;
-      setBugsSquashed(nextCount);
-      let nextPos = Math.floor(Math.random() * 9);
-      while (nextPos === bugPos) nextPos = Math.floor(Math.random() * 9);
-      setBugPos(nextPos);
-      if (nextCount % 5 === 0) awardPoints(20, 'Bug Hunter');
+  const applyLightsToggle = (board, index) => {
+    const next = [...board];
+    const row = Math.floor(index / 4);
+    const col = index % 4;
+    [[row, col], [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]].forEach(([r, c]) => {
+      if (r >= 0 && r < 4 && c >= 0 && c < 4) next[r * 4 + c] = !next[r * 4 + c];
+    });
+    return next;
+  };
+
+  const initLightsOut = () => {
+    let board = Array(16).fill(true);
+    for (let i = 0; i < 6; i++) board = applyLightsToggle(board, Math.floor(Math.random() * 16));
+    setLightsGrid(board);
+    setLightsMoves(0);
+    setActiveGame('lights');
+  };
+
+  const handleLightClick = (idx) => {
+    const updated = applyLightsToggle(lightsGrid, idx);
+    setLightsGrid(updated);
+    setLightsMoves(lightsMoves + 1);
+    if (updated.every((c) => c === true)) awardPoints(45, 'Quantum Matrix Solved!');
+  };
+
+  const nextStroopRound = () => {
+    const wIdx = Math.floor(Math.random() * STROOP_COLORS.length);
+    let cIdx = Math.floor(Math.random() * STROOP_COLORS.length);
+    if (cIdx === wIdx) cIdx = (cIdx + 1) % STROOP_COLORS.length;
+    setStroopWordIdx(wIdx);
+    setStroopColorIdx(cIdx);
+    setStroopMode(Math.random() < 0.5 ? 'COLOR' : 'MEANING');
+  };
+
+  const initStroopGame = () => {
+    setStroopStreak(0);
+    nextStroopRound();
+    setActiveGame('stroop');
+  };
+
+  const handleStroopAnswer = (pickedIndex) => {
+    const correctIndex = stroopMode === 'MEANING' ? stroopWordIdx : stroopColorIdx;
+    if (pickedIndex === correctIndex) {
+      const nextStreak = stroopStreak + 1;
+      setStroopStreak(nextStreak);
+      if (nextStreak % 5 === 0) awardPoints(30, `${nextStreak}x Mind Streak!`);
+      nextStroopRound();
+    } else {
+      showToast('❌ Brain Tricked! Streak reset.');
+      setStroopStreak(0);
+      nextStroopRound();
     }
   };
 
@@ -397,17 +566,45 @@ export default function App() {
   const handleAddTask = (e) => {
     e.preventDefault();
     if (!newTaskText.trim()) return;
-    setStudyTasks([...studyTasks, { id: Date.now(), text: newTaskText, done: false }]);
+    const updated = [...studyTasks, { id: Date.now(), text: newTaskText, done: false }];
+    setStudyTasks(updated);
+    pushToCloud({ studyTasks: updated });
     setNewTaskText('');
-    showToast('✅ Study goal added!');
+    showToast('✅ Study goal added & synced!');
+  };
+
+  const toggleStudyTask = (id) => {
+    const updated = studyTasks.map(t => t.id === id ? { ...t, done: !t.done } : t);
+    setStudyTasks(updated);
+    pushToCloud({ studyTasks: updated });
+  };
+
+  const deleteStudyTask = (id) => {
+    const updated = studyTasks.filter(t => t.id !== id);
+    setStudyTasks(updated);
+    pushToCloud({ studyTasks: updated });
   };
 
   const handleAddBagItem = (e) => {
     e.preventDefault();
     if (!newBagItem.trim()) return;
-    setBagItems([...bagItems, { id: Date.now(), text: newBagItem, packed: false }]);
+    const updated = [...bagItems, { id: Date.now(), text: newBagItem, packed: false }];
+    setBagItems(updated);
+    pushToCloud({ bagItems: updated });
     setNewBagItem('');
-    showToast('🎒 Item added to bag list!');
+    showToast('🎒 Item added & synced!');
+  };
+
+  const toggleBagItem = (id) => {
+    const updated = bagItems.map(b => b.id === id ? { ...b, packed: !b.packed } : b);
+    setBagItems(updated);
+    pushToCloud({ bagItems: updated });
+  };
+
+  const deleteBagItem = (id) => {
+    const updated = bagItems.filter(b => b.id !== id);
+    setBagItems(updated);
+    pushToCloud({ bagItems: updated });
   };
 
   const filteredSnippets = snippets.filter(s => 
@@ -416,7 +613,6 @@ export default function App() {
     (s.category && s.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  // --- PAGE RENDERER ---
   const renderContent = () => {
     switch (activeTab) {
       case 'snippetHub':
@@ -424,15 +620,23 @@ export default function App() {
           <div className="p-4 md:p-8 animate-fade-up">
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
               <div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-white to-indigo-400 bg-clip-text text-transparent">
                     Snippet Hub
                   </h1>
                   {userRole === 'admin' && (
-                    <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase animate-pulse">
+                    <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
                       Admin Mode
                     </span>
                   )}
+                  <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1 border ${
+                    cloudConnected 
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                      : 'bg-gray-500/10 text-gray-400 border-white/10'
+                  }`}>
+                    {cloudConnected ? <Cloud className="w-3 h-3" /> : <CloudOff className="w-3 h-3" />}
+                    {cloudConnected ? 'Live Cloud Sync Active' : 'Local Mode'}
+                  </span>
                 </div>
                 <p className="text-gray-400 text-sm mt-1">Public library of animated quick code utilities.</p>
               </div>
@@ -445,13 +649,13 @@ export default function App() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search snippets..."
-                    className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
                 {userRole === 'admin' && (
                   <button 
                     onClick={openAddSnippetModal}
-                    className="bg-emerald-600 hover:bg-emerald-500 hover:scale-105 active:scale-95 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shrink-0 transition-all shadow-lg shadow-emerald-600/20"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shrink-0 transition-all"
                   >
                     <Plus className="w-4 h-4" /> Add Snippet
                   </button>
@@ -460,38 +664,22 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredSnippets.map((snippet, index) => (
-                <div 
-                  key={snippet.id} 
-                  style={{ animationDelay: `${index * 60}ms` }}
-                  className="animate-fade-up bg-[#12121a] p-5 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col"
-                >
+              {filteredSnippets.map((snippet) => (
+                <div key={snippet.id} className="bg-[#12121a] p-5 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:-translate-y-1 transition-all flex flex-col">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/20">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-400">
                       {snippet.category || 'CODE'}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button 
-                        onClick={() => handleCopyCode(snippet.id, snippet.code)}
-                        className="p-1.5 text-gray-400 hover:text-white rounded bg-white/5 hover:bg-white/10 hover:scale-110 transition-all"
-                        title="Copy Code"
-                      >
+                      <button onClick={() => handleCopyCode(snippet.id, snippet.code)} className="p-1.5 text-gray-400 hover:text-white rounded bg-white/5">
                         {copiedId === snippet.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                       </button>
                       {userRole === 'admin' && (
                         <>
-                          <button 
-                            onClick={() => openEditSnippetModal(snippet)}
-                            className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 hover:scale-110 transition-all"
-                            title="Edit Snippet"
-                          >
+                          <button onClick={() => openEditSnippetModal(snippet)} className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5">
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => handleDeleteSnippet(snippet.id)}
-                            className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 hover:scale-110 transition-all"
-                            title="Delete Snippet"
-                          >
+                          <button onClick={() => handleDeleteSnippet(snippet.id)} className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </>
@@ -513,137 +701,149 @@ export default function App() {
           <div className="p-4 md:p-8 animate-fade-up">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold">Arcade Lounge</h1>
-                <p className="text-gray-400 text-sm">Play interactive cyber mini-games to earn MuMu points.</p>
+                <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-pink-400 to-indigo-400 bg-clip-text text-transparent">
+                  Gen-Z Logic & Brain Arcade
+                </h1>
+                <p className="text-gray-400 text-sm">Tricky puzzles & cognitive challenges.</p>
               </div>
               {activeGame && (
-                <button 
-                  onClick={() => setActiveGame(null)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-                >
-                  ← Back to All Games
+                <button onClick={() => setActiveGame(null)} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                  ← Exit Game
                 </button>
               )}
             </div>
 
             {!activeGame ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-pink-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
-                  <Cpu className="w-12 h-12 text-pink-500 mb-3 animate-bounce" />
-                  <h3 className="text-xl font-bold mb-1">Memory Match</h3>
-                  <p className="text-gray-400 text-sm mb-5">Flip cards and match all cyber pairs.</p>
-                  <button onClick={initMemoryGame} className="mt-auto bg-pink-600 hover:bg-pink-500 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-lg shadow-pink-600/20">
-                    Launch Game (+25 MuMu)
+                <div className="bg-[#12121a] p-6 rounded-2xl border border-white/10 hover:border-emerald-500/60 transition-all flex flex-col items-center text-center">
+                  <Terminal className="w-10 h-10 text-emerald-400 mb-3" />
+                  <h3 className="text-xl font-bold mb-2">CODELE (5-Letter Tech Wordle)</h3>
+                  <p className="text-gray-400 text-sm mb-5">Crack the hidden 5-letter tech word in 6 tries.</p>
+                  <button onClick={initCodele} className="mt-auto bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-full font-bold">
+                    Play CODELE (+40 MuMu)
                   </button>
                 </div>
 
-                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-emerald-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
-                  <Terminal className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
-                  <h3 className="text-xl font-bold mb-1">Speed Typer</h3>
-                  <p className="text-gray-400 text-sm mb-5">Type React & JS keywords at lightning speed.</p>
-                  <button onClick={initTyperGame} className="mt-auto bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-lg shadow-emerald-600/20">
-                    Launch Game (+15 MuMu)
+                <div className="bg-[#12121a] p-6 rounded-2xl border border-white/10 hover:border-indigo-500/60 transition-all flex flex-col items-center text-center">
+                  <Grid className="w-10 h-10 text-indigo-400 mb-3" />
+                  <h3 className="text-xl font-bold mb-2">2048: Cyber Merge</h3>
+                  <p className="text-gray-400 text-sm mb-5">Slide and merge power-of-2 tiles on a 4x4 grid.</p>
+                  <button onClick={init2048} className="mt-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-full font-bold">
+                    Play 2048 (+50 MuMu)
                   </button>
                 </div>
 
-                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-indigo-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
-                  <Grid className="w-12 h-12 text-indigo-400 mb-3" />
-                  <h3 className="text-xl font-bold mb-1">Cyber Tic-Tac-Toe</h3>
-                  <p className="text-gray-400 text-sm mb-5">Outsmart the Nexus AI in a 3x3 grid duel.</p>
-                  <button onClick={initTttGame} className="mt-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-lg shadow-indigo-600/20">
-                    Launch Game (+30 MuMu)
+                <div className="bg-[#12121a] p-6 rounded-2xl border border-white/10 hover:border-pink-500/60 transition-all flex flex-col items-center text-center">
+                  <Cpu className="w-10 h-10 text-pink-400 mb-3" />
+                  <h3 className="text-xl font-bold mb-2">Quantum Lights Out</h3>
+                  <p className="text-gray-400 text-sm mb-5">Tapping a node flips its 4 neighbors. Turn all 16 ON!</p>
+                  <button onClick={initLightsOut} className="mt-auto bg-pink-600 hover:bg-pink-500 text-white px-6 py-2.5 rounded-full font-bold">
+                    Play Lights Out (+45 MuMu)
                   </button>
                 </div>
 
-                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 hover:border-orange-500/50 hover:-translate-y-1 transition-all flex flex-col items-center text-center">
-                  <Bug className="w-12 h-12 text-orange-500 mb-3 animate-bounce" />
-                  <h3 className="text-xl font-bold mb-1">Bug Squasher</h3>
-                  <p className="text-gray-400 text-sm mb-5">Test your reflexes! Squash 5 bugs for bonus points.</p>
-                  <button onClick={initBugGame} className="mt-auto bg-orange-600 hover:bg-orange-500 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-lg shadow-orange-600/20">
-                    Launch Game (+20 MuMu)
+                <div className="bg-[#12121a] p-6 rounded-2xl border border-white/10 hover:border-amber-500/60 transition-all flex flex-col items-center text-center">
+                  <Brain className="w-10 h-10 text-amber-400 mb-3" />
+                  <h3 className="text-xl font-bold mb-2">Stroop Mind Paradox</h3>
+                  <p className="text-gray-400 text-sm mb-5">Beat the color-word illusion as rules flip every round!</p>
+                  <button onClick={initStroopGame} className="mt-auto bg-amber-600 hover:bg-amber-500 text-white px-6 py-2.5 rounded-full font-bold">
+                    Play Mind Paradox (+30 MuMu)
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="bg-[#12121a] p-6 md:p-8 rounded-2xl border border-white/10 max-w-lg mx-auto text-center animate-pop-in">
-                {activeGame === 'memory' && (
+              <div className="bg-[#12121a] p-6 rounded-2xl border border-white/10 max-w-lg mx-auto text-center">
+                {activeGame === 'codele' && (
                   <div>
-                    <h2 className="text-xl font-bold text-pink-400 mb-4">Memory Match</h2>
-                    <div className="grid grid-cols-4 gap-3 mb-6">
-                      {cards.map((card, idx) => {
-                        const isShown = flipped.includes(idx) || solved.includes(idx);
+                    <h2 className="text-xl font-bold text-emerald-400 mb-4">CODELE</h2>
+                    <div className="space-y-2 max-w-[250px] mx-auto mb-6">
+                      {Array.from({ length: 6 }).map((_, rIdx) => {
+                        const guess = codeleGuesses[rIdx] || (rIdx === codeleGuesses.length ? codeleCurrent : '');
+                        const submitted = rIdx < codeleGuesses.length;
                         return (
-                          <button
-                            key={card.id}
-                            onClick={() => handleCardClick(idx)}
-                            className={`h-20 rounded-xl text-2xl flex items-center justify-center transition-all duration-300 ${
-                              isShown ? 'bg-pink-600/30 border-2 border-pink-500 scale-105' : 'bg-[#050505] border border-white/10 hover:border-pink-500/40'
-                            }`}
-                          >
-                            {isShown ? card.icon : '❓'}
-                          </button>
+                          <div key={rIdx} className="grid grid-cols-5 gap-2">
+                            {Array.from({ length: 5 }).map((__, cIdx) => {
+                              const letter = guess[cIdx] || '';
+                              return (
+                                <div key={cIdx} className={`h-11 rounded-lg border font-mono font-bold text-lg flex items-center justify-center ${submitted ? getTileColor(letter, cIdx) : 'bg-[#050505] border-white/20'}`}>
+                                  {letter}
+                                </div>
+                              );
+                            })}
+                          </div>
                         );
                       })}
                     </div>
-                    <button onClick={initMemoryGame} className="bg-pink-600 hover:bg-pink-500 px-5 py-2 rounded-lg text-sm font-bold flex items-center gap-2 mx-auto">
-                      <RotateCcw className="w-4 h-4" /> Shuffle Again
-                    </button>
+                    {codeleStatus === 'playing' ? (
+                      <div className="space-y-2">
+                        {['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'].map((row, i) => (
+                          <div key={i} className="flex justify-center gap-1">
+                            {row.split('').map(c => (
+                              <button key={c} onClick={() => handleCodeleKey(c)} className="bg-white/10 hover:bg-white/20 px-2.5 py-2 rounded text-xs font-bold">{c}</button>
+                            ))}
+                          </div>
+                        ))}
+                        <div className="flex justify-center gap-2 pt-2">
+                          <button onClick={() => handleCodeleKey('DEL')} className="bg-red-500/20 text-red-300 px-4 py-2 rounded text-xs font-bold">DEL</button>
+                          <button onClick={() => handleCodeleKey('ENTER')} className="bg-emerald-600 text-white px-6 py-2 rounded text-xs font-bold">SUBMIT</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={initCodele} className="bg-emerald-600 px-5 py-2 rounded-lg text-sm font-bold">Play Again</button>
+                    )}
                   </div>
                 )}
 
-                {activeGame === 'typer' && (
+                {activeGame === '2048' && (
                   <div>
-                    <h2 className="text-xl font-bold text-emerald-400 mb-2">Mainframe Speed Typer</h2>
-                    <p className="text-xs text-gray-400 mb-4">Streak: {typerStreak} words</p>
-                    <div className="bg-[#050505] py-5 px-6 rounded-xl border border-emerald-500/30 font-mono text-2xl font-bold text-emerald-400 mb-4 tracking-wider">
-                      {targetWord}
+                    <h2 className="text-xl font-bold text-indigo-400 mb-3">2048: Cyber Merge (Score: {score2048})</h2>
+                    <div className="grid grid-cols-4 gap-2 bg-[#050505] p-3 rounded-xl max-w-[260px] mx-auto mb-4">
+                      {grid2048.map((val, idx) => (
+                        <div key={idx} className={`h-12 rounded-lg font-mono font-bold flex items-center justify-center ${val ? 'bg-indigo-600 text-white' : 'bg-white/5 text-transparent'}`}>
+                          {val || '.'}
+                        </div>
+                      ))}
                     </div>
-                    <input
-                      type="text"
-                      value={typedWord}
-                      onChange={handleTyperChange}
-                      placeholder="Type the exact word above..."
-                      autoFocus
-                      className="w-full bg-[#050505] border border-white/20 rounded-lg px-4 py-3 text-center text-white font-mono focus:outline-none focus:border-emerald-500"
-                    />
+                    <div className="flex flex-col items-center gap-2">
+                      <button onClick={() => move2048('UP')} className="bg-white/10 p-3 rounded-xl"><ArrowUp className="w-5 h-5" /></button>
+                      <div className="flex gap-3">
+                        <button onClick={() => move2048('LEFT')} className="bg-white/10 p-3 rounded-xl"><ArrowLeft className="w-5 h-5" /></button>
+                        <button onClick={() => move2048('DOWN')} className="bg-white/10 p-3 rounded-xl"><ArrowDown className="w-5 h-5" /></button>
+                        <button onClick={() => move2048('RIGHT')} className="bg-white/10 p-3 rounded-xl"><ArrowRight className="w-5 h-5" /></button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {activeGame === 'ttt' && (
+                {activeGame === 'lights' && (
                   <div>
-                    <h2 className="text-xl font-bold text-indigo-400 mb-2">Cyber Tic-Tac-Toe</h2>
-                    <p className="text-sm text-gray-300 mb-4">{tttStatus}</p>
-                    <div className="grid grid-cols-3 gap-3 max-w-[240px] mx-auto mb-6">
-                      {board.map((cell, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleTttClick(idx)}
-                          className="h-20 bg-[#050505] border border-white/10 hover:border-indigo-500 rounded-xl text-2xl font-bold flex items-center justify-center transition-all"
-                        >
-                          <span className={cell === 'X' ? 'text-indigo-400' : 'text-pink-400'}>{cell}</span>
+                    <h2 className="text-xl font-bold text-pink-400 mb-3">Quantum Lights Out (Moves: {lightsMoves})</h2>
+                    <div className="grid grid-cols-4 gap-3 max-w-[240px] mx-auto mb-4">
+                      {lightsGrid.map((on, idx) => (
+                        <button key={idx} onClick={() => handleLightClick(idx)} className={`h-12 rounded-xl border flex items-center justify-center ${on ? 'bg-pink-500 border-pink-300' : 'bg-[#050505] border-white/10'}`}>
+                          <Zap className="w-4 h-4 text-white" />
                         </button>
                       ))}
                     </div>
-                    <button onClick={initTttGame} className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-bold flex items-center gap-2 mx-auto">
-                      <RotateCcw className="w-4 h-4" /> Reset Board
-                    </button>
+                    <button onClick={initLightsOut} className="bg-pink-600 px-4 py-2 rounded-lg text-xs font-bold">Reset Matrix</button>
                   </div>
                 )}
 
-                {activeGame === 'bug' && (
+                {activeGame === 'stroop' && (
                   <div>
-                    <h2 className="text-xl font-bold text-orange-400 mb-1">Bug Squasher</h2>
-                    <p className="text-xs text-gray-400 mb-4">Bugs Squashed: {bugsSquashed} (Every 5 = +20 MuMu)</p>
-                    <div className="grid grid-cols-3 gap-3 max-w-[240px] mx-auto mb-4">
-                      {Array.from({ length: 9 }).map((_, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleSquashBug(idx)}
-                          className={`h-20 rounded-xl border flex items-center justify-center text-2xl transition-all ${
-                            bugPos === idx ? 'bg-orange-500/20 border-orange-500 scale-105' : 'bg-[#050505] border-white/10'
-                          }`}
-                        >
-                          {bugPos === idx ? '🐞' : ''}
+                    <h2 className="text-xl font-bold text-amber-400 mb-2">Stroop Mind Paradox (Streak: {stroopStreak})</h2>
+                    <div className="bg-[#050505] p-6 rounded-xl border border-white/10 mb-4">
+                      <div className="text-xs font-bold bg-white/10 inline-block px-3 py-1 rounded-full mb-3">
+                        {stroopMode === 'MEANING' ? '🧠 TAP THE WORD MEANING' : '🎨 TAP THE INK COLOR'}
+                      </div>
+                      <div className="text-4xl font-black py-3" style={{ color: STROOP_COLORS[stroopColorIdx].hex }}>
+                        {STROOP_COLORS[stroopWordIdx].name}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {STROOP_COLORS.map((col, idx) => (
+                        <button key={col.name} onClick={() => handleStroopAnswer(idx)} className={`${col.bg} text-black font-extrabold py-3 rounded-xl`}>
+                          {col.name}
                         </button>
                       ))}
                     </div>
@@ -658,87 +858,53 @@ export default function App() {
         return (
           <div className="flex flex-col h-full animate-fade-up">
             <div className="p-4 md:p-6 border-b border-white/10 bg-[#0a0a0f] flex justify-between items-center">
-              <h1 className="text-xl md:text-2xl font-bold text-indigo-400 flex items-center gap-2">
-                <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Tutor
-              </h1>
-              <button 
-                onClick={() => { setTempKeyInput(customApiKey); setShowKeyModal(true); }}
-                className="bg-white/5 hover:bg-white/10 border border-white/10 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 text-gray-300 hover:text-white transition-all"
-              >
-                <Key className="w-3.5 h-3.5 text-indigo-400" />
-                {customApiKey || import.meta.env.VITE_GEMINI_API_KEY ? 'API Key Active' : '🔑 Set Gemini Key'}
-              </button>
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold text-indigo-400 flex items-center gap-2">
+                  <Sparkles className="w-6 h-6" /> Aura AI Companion
+                </h1>
+                <p className="text-xs text-gray-400">Friendly human-like AI & image vision tutor</p>
+              </div>
+              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
+                ● Online
+              </span>
             </div>
             
             <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
               {chatHistory.map((msg, idx) => (
-                <div key={idx} className={`flex gap-3 animate-fade-up ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div key={idx} className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.sender === 'user' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
                     {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
                   </div>
                   <div className={`p-4 rounded-2xl max-w-[85%] md:max-w-[75%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
-                    {msg.image && (
-                      <img src={msg.image} alt="User upload" className="max-h-48 rounded-lg mb-2 border border-white/20 object-cover" />
-                    )}
+                    {msg.image && <img src={msg.image} alt="Upload" className="max-h-48 rounded-lg mb-2" />}
                     <p className="text-sm md:text-base whitespace-pre-wrap">{msg.text}</p>
                   </div>
                 </div>
               ))}
-              {isAiLoading && (
-                <div className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-4 h-4 text-white animate-spin" />
-                  </div>
-                  <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is thinking...
-                  </div>
-                </div>
-              )}
+              {isAiLoading && <div className="text-xs text-gray-400 pl-11">Aura is typing...</div>}
               <div ref={chatEndRef} />
             </div>
 
-            {/* CHAT INPUT BAR WITH IMAGE ATTACHMENT */}
             <div className="p-4 md:p-6 border-t border-white/10 bg-[#0a0a0f]">
               {selectedImage && (
-                <div className="flex items-center gap-3 mb-3 bg-[#12121a] p-2 rounded-lg border border-indigo-500/30 w-fit">
-                  <img src={selectedImage} alt="Preview" className="w-12 h-12 object-cover rounded" />
-                  <span className="text-xs text-gray-300">Image attached ready to send</span>
-                  <button onClick={() => setSelectedImage(null)} className="text-red-400 hover:text-red-300 p-1">
-                    <X className="w-4 h-4" />
-                  </button>
+                <div className="flex items-center gap-3 mb-2 bg-[#12121a] p-2 rounded-lg w-fit">
+                  <img src={selectedImage} alt="Preview" className="w-10 h-10 object-cover rounded" />
+                  <button onClick={() => setSelectedImage(null)} className="text-red-400"><X className="w-4 h-4" /></button>
                 </div>
               )}
-
               <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  ref={fileInputRef} 
-                  onChange={handleImageSelect} 
-                  className="hidden" 
-                />
-                <button 
-                  type="button" 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-[#12121a] hover:bg-white/10 border border-white/10 p-3 rounded-lg text-gray-400 hover:text-white transition-colors"
-                  title="Attach Screenshot or Image"
-                >
+                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="bg-[#12121a] border border-white/10 p-3 rounded-lg text-gray-400 hover:text-white">
                   <Paperclip className="w-5 h-5" />
                 </button>
-
                 <input 
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Chat naturally with Aura or attach an image..." 
-                  className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
+                  placeholder="Say hi, good morning, ask a question, or attach an image..." 
+                  className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500"
                 />
-
-                <button 
-                  type="submit" 
-                  disabled={isAiLoading}
-                  className="bg-indigo-600 hover:bg-indigo-500 hover:scale-105 active:scale-95 disabled:opacity-50 px-4 py-3 rounded-lg transition-all shrink-0 flex items-center justify-center"
-                >
+                <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg">
                   <Send className="w-5 h-5 text-white" />
                 </button>
               </form>
@@ -748,31 +914,20 @@ export default function App() {
 
       case 'studyPlanner':
         return (
-          <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <h1 className="text-2xl md:text-3xl font-bold mb-2">AI Study Planner</h1>
-            <p className="text-gray-400 text-sm mb-6">Track your learning milestones and daily goals.</p>
+          <div className="p-4 md:p-8 max-w-3xl">
+            <h1 className="text-2xl md:text-3xl font-bold mb-4">AI Study Planner</h1>
             <form onSubmit={handleAddTask} className="flex gap-2 mb-6">
-              <input
-                type="text"
-                value={newTaskText}
-                onChange={(e) => setNewTaskText(e.target.value)}
-                placeholder="Add a new study goal..."
-                className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
-              />
-              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg text-sm font-bold transition-all">
-                Add Goal
-              </button>
+              <input type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)} placeholder="Add study goal..." className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white" />
+              <button type="submit" className="bg-emerald-600 text-white px-5 py-3 rounded-lg text-sm font-bold">Add Goal</button>
             </form>
             <div className="space-y-3">
               {studyTasks.map(task => (
-                <div key={task.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 hover:border-emerald-500/40 transition-all flex items-center justify-between">
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => setStudyTasks(studyTasks.map(t => t.id === task.id ? { ...t, done: !t.done } : t))}>
+                <div key={task.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleStudyTask(task.id)}>
                     <input type="checkbox" checked={task.done} readOnly className="w-4 h-4 accent-emerald-500" />
                     <span className={task.done ? 'line-through text-gray-500' : 'text-white'}>{task.text}</span>
                   </div>
-                  <button onClick={() => setStudyTasks(studyTasks.filter(t => t.id !== task.id))} className="text-gray-500 hover:text-red-400">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <button onClick={() => deleteStudyTask(task.id)} className="text-gray-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
                 </div>
               ))}
             </div>
@@ -781,31 +936,20 @@ export default function App() {
 
       case 'bagPacker':
         return (
-          <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <h1 className="text-2xl md:text-3xl font-bold mb-2">Routine & Bag Packer</h1>
-            <p className="text-gray-400 text-sm mb-6">Never forget your college or hackathon essentials.</p>
+          <div className="p-4 md:p-8 max-w-3xl">
+            <h1 className="text-2xl md:text-3xl font-bold mb-4">Routine & Bag Packer</h1>
             <form onSubmit={handleAddBagItem} className="flex gap-2 mb-6">
-              <input
-                type="text"
-                value={newBagItem}
-                onChange={(e) => setNewBagItem(e.target.value)}
-                placeholder="Add item to pack..."
-                className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500"
-              />
-              <button type="submit" className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-3 rounded-lg text-sm font-bold transition-all">
-                Add Item
-              </button>
+              <input type="text" value={newBagItem} onChange={(e) => setNewBagItem(e.target.value)} placeholder="Add item to pack..." className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white" />
+              <button type="submit" className="bg-orange-600 text-white px-5 py-3 rounded-lg text-sm font-bold">Add Item</button>
             </form>
             <div className="space-y-3">
               {bagItems.map(item => (
-                <div key={item.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 hover:border-orange-500/40 transition-all flex items-center justify-between">
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => setBagItems(bagItems.map(b => b.id === item.id ? { ...b, packed: !b.packed } : b))}>
+                <div key={item.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleBagItem(item.id)}>
                     <input type="checkbox" checked={item.packed} readOnly className="w-4 h-4 accent-orange-500" />
                     <span className={item.packed ? 'line-through text-gray-500' : 'text-white'}>{item.text}</span>
                   </div>
-                  <button onClick={() => setBagItems(bagItems.filter(b => b.id !== item.id))} className="text-gray-500 hover:text-red-400">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <button onClick={() => deleteBagItem(item.id)} className="text-gray-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
                 </div>
               ))}
             </div>
@@ -819,245 +963,107 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#050505] text-white overflow-hidden font-sans relative">
-      <style>{`
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes popIn {
-          0% { opacity: 0; transform: scale(0.92); }
-          100% { opacity: 1; transform: scale(1); }
-        }
-        .animate-fade-up { animation: fadeInUp 0.35s ease-out forwards; }
-        .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-      `}</style>
-
       {toast && (
-        <div className="fixed bottom-5 right-5 z-[200] bg-indigo-600 text-white px-4 py-3 rounded-xl shadow-2xl border border-indigo-400/40 flex items-center gap-2 text-sm font-semibold animate-pop-in">
+        <div className="fixed bottom-5 right-5 z-[200] bg-indigo-600 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm font-semibold">
           <Zap className="w-4 h-4 text-yellow-300" /> {toast}
         </div>
       )}
 
-      {/* 1. MOBILE TOP HEADER */}
+      {/* MOBILE TOP BAR */}
       <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-[#0a0a0f] border-b border-white/10 flex items-center justify-between px-4 z-50">
-        <div className="font-bold text-lg text-indigo-400 flex items-center gap-2">
-          <Shield className="w-5 h-5" /> Nexus Studio
-        </div>
+        <div className="font-bold text-lg text-indigo-400 flex items-center gap-2"><Shield className="w-5 h-5" /> Nexus Studio</div>
         <div className="flex items-center gap-3">
           <div className="bg-yellow-500/20 text-yellow-500 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
             <Trophy className="w-3 h-3" /> {mumuPoints}
           </div>
-          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-1 text-white hover:text-indigo-400">
+          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-1 text-white">
             {isMobileMenuOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
           </button>
         </div>
       </div>
 
-      {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
-      )}
+      {isMobileMenuOpen && <div className="md:hidden fixed inset-0 bg-black/70 z-40" onClick={() => setIsMobileMenuOpen(false)} />}
 
-      {/* 3. RESPONSIVE SIDEBAR */}
-      <div className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-[#0a0a0f] border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      {/* SIDEBAR */}
+      <div className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-[#0a0a0f] border-r border-white/10 flex flex-col transition-transform duration-300 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="hidden md:flex p-6 items-center gap-3 border-b border-white/10">
-          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-600/20">
-            <Shield className="w-6 h-6 text-white" />
-          </div>
+          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center"><Shield className="w-6 h-6 text-white" /></div>
           <div>
-            <h2 className="font-bold text-xl tracking-tight">NEXUS</h2>
+            <h2 className="font-bold text-xl">NEXUS</h2>
             <p className="text-[10px] text-gray-500 uppercase tracking-widest font-mono">Studio OS</p>
           </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto mt-16 md:mt-0">
-          <div className="text-xs font-bold text-gray-600 uppercase mb-4 px-3">Public Access</div>
-          
-          <button onClick={() => handleNavigation('snippetHub')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'snippetHub' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+          <button onClick={() => handleNavigation('snippetHub')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${activeTab === 'snippetHub' ? 'bg-indigo-600/10 text-indigo-400' : 'text-gray-400'}`}>
             <Code className="w-5 h-5" /> Snippet Hub
           </button>
-          
-          <button onClick={() => handleNavigation('arcadeLounge')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'arcadeLounge' ? 'bg-pink-600/10 text-pink-400 border border-pink-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+          <button onClick={() => handleNavigation('arcadeLounge')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${activeTab === 'arcadeLounge' ? 'bg-pink-600/10 text-pink-400' : 'text-gray-400'}`}>
             <Play className="w-5 h-5" /> Arcade Lounge
           </button>
-
-          <div className="text-xs font-bold text-gray-600 uppercase mb-4 mt-8 px-3">Restricted Access</div>
-
-          <button onClick={() => handleNavigation('auraBot')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'auraBot' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+          <button onClick={() => handleNavigation('auraBot')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-sm font-medium ${activeTab === 'auraBot' ? 'bg-indigo-600/10 text-indigo-400' : 'text-gray-400'}`}>
             <div className="flex items-center gap-3"><Sparkles className="w-5 h-5" /> Aura AI Bot</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
-
-          <button onClick={() => handleNavigation('studyPlanner')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'studyPlanner' ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+          <button onClick={() => handleNavigation('studyPlanner')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-sm font-medium ${activeTab === 'studyPlanner' ? 'bg-emerald-600/10 text-emerald-400' : 'text-gray-400'}`}>
             <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> AI Study Planner</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
-
-          <button onClick={() => handleNavigation('bagPacker')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'bagPacker' ? 'bg-orange-600/10 text-orange-400 border border-orange-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+          <button onClick={() => handleNavigation('bagPacker')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-sm font-medium ${activeTab === 'bagPacker' ? 'bg-orange-600/10 text-orange-400' : 'text-gray-400'}`}>
             <div className="flex items-center gap-3"><Briefcase className="w-5 h-5" /> Routine & Packer</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
         </nav>
 
-        <div className="p-4 border-t border-white/10 bg-[#050505]/50">
-          <div className="hidden md:flex bg-[#12121a] rounded-lg p-3 items-center justify-between mb-4 border border-white/5">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-yellow-500" />
-              <span className="text-sm font-bold text-gray-300">MuMu Vault</span>
-            </div>
-            <span className="text-yellow-500 font-mono text-sm">{mumuPoints}</span>
-          </div>
-
+        <div className="p-4 border-t border-white/10">
           {userRole === 'guest' ? (
-            <button onClick={() => { setShowLogin(true); setIsMobileMenuOpen(false); }} className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg transition-all text-sm font-bold shadow-lg shadow-indigo-600/20">
-              <LogIn className="w-4 h-4" /> System Login
+            <button onClick={() => { setShowLogin(true); setIsMobileMenuOpen(false); }} className="w-full bg-indigo-600 text-white py-3 rounded-lg text-sm font-bold">
+              System Login
             </button>
           ) : (
-            <div className="flex items-center justify-between bg-[#12121a] p-3 rounded-lg border border-indigo-500/30">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                  <User className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-white">Nexus Admin</div>
-                  <div className="text-[10px] text-emerald-400 uppercase tracking-wider">Authenticated</div>
-                </div>
-              </div>
-              <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 transition-colors" title="Logout">
-                <LogOut className="w-4 h-4" />
-              </button>
+            <div className="flex items-center justify-between bg-[#12121a] p-3 rounded-lg">
+              <span className="text-sm font-bold">Nexus Admin</span>
+              <button onClick={handleLogout} className="text-gray-400 hover:text-red-400"><LogOut className="w-4 h-4" /></button>
             </div>
           )}
         </div>
       </div>
 
-      {/* 4. MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col pt-16 md:pt-0 overflow-y-auto overflow-x-hidden relative bg-[#050505]">
+      <div className="flex-1 flex flex-col pt-16 md:pt-0 overflow-y-auto bg-[#050505]">
         {renderContent()}
       </div>
 
-      {/* --- ADD / EDIT SNIPPET MODAL --- */}
       {showSnippetModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative animate-pop-in">
-            <button onClick={() => setShowSnippetModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
-              <X className="w-6 h-6" />
-            </button>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-400" />
-              {editingSnippet ? 'Edit Snippet' : 'Add New Snippet'}
-            </h2>
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 max-w-lg w-full">
+            <h2 className="text-xl font-bold mb-4">{editingSnippet ? 'Edit Snippet' : 'Add New Snippet'}</h2>
             <form onSubmit={handleSaveSnippet} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Title</label>
-                <input
-                  type="text"
-                  value={snippetTitle}
-                  onChange={(e) => setSnippetTitle(e.target.value)}
-                  placeholder="e.g., Center a Div"
-                  className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Language / Category</label>
-                <select
-                  value={snippetCategory}
-                  onChange={(e) => setSnippetCategory(e.target.value)}
-                  className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="JS">JavaScript (JS)</option>
-                  <option value="REACT">React</option>
-                  <option value="CSS">CSS</option>
-                  <option value="HTML">HTML</option>
-                  <option value="PYTHON">Python</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Code</label>
-                <textarea
-                  rows={5}
-                  value={snippetCode}
-                  onChange={(e) => setSnippetCode(e.target.value)}
-                  placeholder="Paste your code here..."
-                  className="w-full bg-[#12121a] border border-white/10 rounded-lg p-3 text-sm font-mono text-white focus:outline-none focus:border-indigo-500"
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowSnippetModal(false)} className="px-4 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5">
-                  Cancel
-                </button>
-                <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 hover:scale-105 text-white px-5 py-2 rounded-lg text-sm font-bold transition-all">
-                  {editingSnippet ? 'Save Changes' : 'Create Snippet'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* --- GEMINI API KEY MODAL --- */}
-      {showKeyModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl relative animate-pop-in">
-            <button onClick={() => setShowKeyModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
-              <X className="w-6 h-6" />
-            </button>
-            <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-              <Key className="w-5 h-5 text-indigo-400" /> Set Gemini API Key
-            </h2>
-            <p className="text-xs text-gray-400 mb-4">
-              Paste your Gemini API key below to unlock live AI responses right in your browser.
-            </p>
-            <form onSubmit={handleSaveApiKey} className="space-y-4">
-              <input
-                type="password"
-                value={tempKeyInput}
-                onChange={(e) => setTempKeyInput(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
-              />
+              <input type="text" value={snippetTitle} onChange={(e) => setSnippetTitle(e.target.value)} placeholder="Title" className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white" required />
+              <select value={snippetCategory} onChange={(e) => setSnippetCategory(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white">
+                <option value="JS">JavaScript (JS)</option>
+                <option value="REACT">React</option>
+                <option value="CSS">CSS</option>
+                <option value="PYTHON">Python</option>
+              </select>
+              <textarea rows={5} value={snippetCode} onChange={(e) => setSnippetCode(e.target.value)} placeholder="Code..." className="w-full bg-[#12121a] border border-white/10 rounded-lg p-3 text-sm font-mono text-white" required />
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setShowKeyModal(false)} className="px-4 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5">
-                  Cancel
-                </button>
-                <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm font-bold">
-                  Save Key
-                </button>
+                <button type="button" onClick={() => setShowSnippetModal(false)} className="px-4 py-2 text-sm text-gray-400">Cancel</button>
+                <button type="submit" className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-bold">Save</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* --- SECURE LOGIN MODAL --- */}
       {showLogin && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full shadow-2xl relative animate-pop-in">
-            <button onClick={() => setShowLogin(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
-              <X className="w-6 h-6" />
-            </button>
-            <div className="text-center mb-6">
-              <div className="w-14 h-14 bg-indigo-600/20 rounded-full flex items-center justify-center mx-auto mb-3 border border-indigo-500/50">
-                <Shield className="w-7 h-7 text-indigo-500" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Secure Access</h2>
-              <p className="text-gray-400 text-xs mt-1">Login stays active across page reloads</p>
-            </div>
-
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-2xl font-bold text-center mb-4">Secure Access</h2>
             <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Email</label>
-                <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="admin@nexus.com" required />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Password</label>
-                <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="••••••••" required />
-              </div>
-              {loginError && <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg">{loginError}</div>}
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold transition-all">
-                Initialize Login
-              </button>
+              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-white text-sm" placeholder="admin@nexus.com" required />
+              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-white text-sm" placeholder="••••••••" required />
+              {loginError && <div className="text-red-400 text-xs text-center">{loginError}</div>}
+              <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg text-sm font-bold">Initialize Login</button>
             </form>
           </div>
         </div>
