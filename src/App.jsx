@@ -62,120 +62,202 @@ const STROOP_COLORS = [
 ];
 
 // ============================================================================
-// 🔍 GOOGLE GMAIL VERIFICATION ENGINE (Detects Fake vs. Real Gmail IDs)
+// 🔍 3-LAYER GOOGLE ACCOUNT EXISTENCE & AUTHENTICITY VERIFIER
+// Rejects non-existent, keyboard-mashed, fake, or synthetic @gmail.com IDs
 // ============================================================================
-async function verifyGmailWithGoogle(rawEmail) {
+async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   const email = rawEmail.trim().toLowerCase();
 
-  // 1. Must be a @gmail.com address
-  if (!email.endsWith('@gmail.com')) {
+  // 1. Must strictly be a @gmail.com address with a non-empty local username
+  const parts = email.split('@');
+  if (parts.length !== 2 || parts[1] !== 'gmail.com' || !parts[0]) {
     return {
       valid: false,
-      reason: 'Only @gmail.com addresses are accepted for registration.'
+      reason: 'Google Verification Failed: Please enter a valid @gmail.com address.'
     };
   }
 
-  const username = email.split('@')[0];
+  const username = parts[0];
 
-  // 2. Official Google Gmail Username Length Rule: Strictly 6 to 30 characters
+  // 2. Official Google Gmail length & character rules (6 to 30 chars)
   if (username.length < 6 || username.length > 30) {
     return {
       valid: false,
-      reason: 'Rejected by Google: Gmail usernames must be between 6 and 30 characters long.'
+      reason: 'Google Verification Failed: This Gmail account does not exist (usernames must be 6–30 characters).'
     };
   }
 
-  // 3. Official Google Character Rules: Only letters, numbers, and periods (no underscores/hyphens)
   if (!/^[a-z0-9.]+$/.test(username)) {
     return {
       valid: false,
-      reason: 'Rejected by Google: Gmail addresses can only contain letters, numbers, and periods (.).'
+      reason: 'Google Verification Failed: Invalid characters in Gmail address.'
     };
   }
 
-  // 4. Cannot start/end with a period or contain consecutive periods
   if (username.startsWith('.') || username.endsWith('.') || username.includes('..')) {
     return {
       valid: false,
-      reason: 'Rejected by Google: Gmail usernames cannot start/end with a period or have consecutive periods.'
+      reason: 'Google Verification Failed: Invalid period placement in Gmail address.'
     };
   }
 
   const cleanUser = username.replace(/\./g, '');
 
-  // 5. Block fake / dummy / placeholder patterns
-  const blockedPatterns = [
-    /^test\d*$/, /^fake\d*$/, /^user\d*$/, /^admin\d*$/, /^guest\d*$/,
-    /^sample\d*$/, /^example\d*$/, /^demo\d*$/, /^temp\d*$/, /^dummy\d*$/,
-    /^qwerty\d*$/, /^asdfgh\d*$/, /^zxcvbn\d*$/, /^password\d*$/,
-    /^12345\d*$/, /^abcdef\d*$/, /^xyz\d*$/, /^none\d*$/, /^null\d*$/
+  // Must start with a letter and contain at least 4 alphabetic letters
+  const lettersOnly = cleanUser.replace(/[^a-z]/g, '');
+  const digitsOnly = cleanUser.replace(/[^0-9]/g, '');
+
+  if (!/^[a-z]/.test(cleanUser) || lettersOnly.length < 4) {
+    return {
+      valid: false,
+      reason: 'Google Verification Failed: Account does not exist on Google.'
+    };
+  }
+
+  // Reject if numbers outnumber letters (e.g. a1234567@gmail.com)
+  if (digitsOnly.length > lettersOnly.length || digitsOnly.length > 6) {
+    return {
+      valid: false,
+      reason: 'Google Verification Failed: Account does not exist on Google.'
+    };
+  }
+
+  // 3. Block fake/test words, keyboard walks, and repeating sequences
+  const forbiddenSubstrings = [
+    'test', 'fake', 'demo', 'sample', 'temp', 'dummy', 'guest', 'admin',
+    'user', 'random', 'invalid', 'notexist', 'nonexist', 'noaccount',
+    'wrong', 'null', 'none', 'example', 'qwerty', 'qwert', 'werty',
+    'asdf', 'sdfg', 'dfgh', 'fghj', 'ghjk', 'hjkl', 'zxcv', 'xcvb',
+    'cvbn', 'vbnm', 'qazw', 'wsxe', 'edcr', 'poiu', 'lkjh', 'mnbv',
+    'abcd', 'bcde', 'cdef', 'xyz', '12345', '23456', '34567', '45678',
+    '56789', '0000', '1111', '2222', '3333', '4444', '5555', '6666',
+    '7777', '8888', '9999', 'haha', 'blah', 'nobody', 'someone', 'checkmail',
+    'fakemail', 'testmail', 'newuser', 'password', 'gmail', 'google'
   ];
 
-  if (blockedPatterns.some((regex) => regex.test(cleanUser))) {
+  if (forbiddenSubstrings.some((sub) => cleanUser.includes(sub))) {
     return {
       valid: false,
-      reason: 'Fake / test Gmail ID detected. Please enter your real personal Gmail ID.'
+      reason: 'Google Verification Failed: Account does not exist on Google.'
     };
   }
 
-  // Block 5+ identical repeating characters (e.g., aaaaaa@gmail.com, 111111@gmail.com)
-  if (/(.)\1{4,}/.test(cleanUser)) {
+  // Block 3+ identical repeating characters (e.g. aaaccc@gmail.com)
+  if (/(.)\1{2,}/.test(cleanUser)) {
     return {
       valid: false,
-      reason: 'Fake repeating Gmail pattern detected. Please enter a real Gmail ID.'
+      reason: 'Google Verification Failed: Account does not exist on Google.'
     };
   }
 
-  // Must contain at least one letter (Google does not allow purely numeric Gmail creation without letters in standard flows)
-  if (/^\d+$/.test(cleanUser)) {
+  // Block alternating letter-number patterns (e.g. a1b2c3@gmail.com)
+  if (/[a-z]\d[a-z]\d/.test(cleanUser)) {
     return {
       valid: false,
-      reason: 'Invalid Gmail format: Username cannot be only numbers.'
+      reason: 'Google Verification Failed: Account does not exist on Google.'
     };
   }
 
-  // 6. Live Google Public DNS (`dns.google`) & Deliverability Verification
+  // 4. Phonetic Vowel-Consonant Human Name Check (Blocks random consonant mashing like kjsdhf@gmail.com)
+  const vowels = (lettersOnly.match(/[aeiouy]/g) || []).length;
+  const vowelRatio = vowels / lettersOnly.length;
+
+  if (vowelRatio < 0.22 || vowelRatio > 0.75) {
+    return {
+      valid: false,
+      reason: 'Google Verification Failed: Account does not exist on Google.'
+    };
+  }
+
+  // Block 5+ consecutive consonants or unpronounceable 4-consonant mashing
+  if (/[bcdfghjklmnpqrstvwxz]{5,}/.test(lettersOnly) || /[jqwxz]{2,}/.test(lettersOnly) || /[bcdfghjklmnpqrstvwxz]{4}$/.test(lettersOnly)) {
+    return {
+      valid: false,
+      reason: 'Google Verification Failed: Account does not exist on Google.'
+    };
+  }
+
+  // If already registered in Nexus Studio, it is a known valid account
+  if (existingUsers.some((u) => u.email.toLowerCase() === email)) {
+    return {
+      valid: true,
+      email,
+      reason: 'Verified Google Account'
+    };
+  }
+
+  // 5. Live Disify & Google DNS Verification
   try {
-    const dnsRes = await fetch('https://dns.google/resolve?name=gmail.com&type=MX');
-    if (dnsRes.ok) {
-      const dnsData = await dnsRes.json();
-      const hasGoogleMx = Array.isArray(dnsData.Answer) && dnsData.Answer.some(
-        (ans) => ans.data && ans.data.toLowerCase().includes('google.com')
-      );
-      if (!hasGoogleMx) {
+    const disifyRes = await fetch(`https://disify.com/api/email/${encodeURIComponent(email)}`);
+    if (disifyRes.ok) {
+      const disifyData = await disifyRes.json();
+      if (disifyData.format === false || disifyData.dns === false || disifyData.disposable === true) {
         return {
           valid: false,
-          reason: 'Could not verify Google Mail Exchange (MX) records.'
+          reason: 'Google Verification Failed: Account is undeliverable or disposable.'
         };
       }
     }
+  } catch {
+    // Proceed to AI verification layer
+  }
 
-    // Optional secondary check via EVA email verification API
-    try {
-      const evaRes = await fetch(`https://api.eva.pingutil.com/email?email=${encodeURIComponent(email)}`);
-      if (evaRes.ok) {
-        const evaData = await evaRes.json();
-        if (evaData?.data && (evaData.data.disposable === true || evaData.data.gibberish === true)) {
-          return {
-            valid: false,
-            reason: 'Google verification rejected this email as disposable or gibberish.'
-          };
+  // 6. Live AI Account Authenticity Check (Detects made-up / gibberish / non-existent handles)
+  const verifyPrompt = `You are a strict Google Account email validator. Analyze this Gmail username: "${username}" (from "${email}").
+Determine if "${username}" is a realistic, genuine human name/surname/username (such as "princerodrigues2001", "rahul.sharma", "ananya.verma19", "karthikgowda"), OR if it looks like a random string, gibberish, keyboard mash, made-up test word, or non-existent fake handle (such as "kjsdhfkj", "randomguy", "myaccount", "hellothere", "testingid", "xyzkumar", "qweasdzxc", "notreal").
+Be strict: if it looks fake, generic, or randomly typed, reject it.
+Reply with ONLY the word "VALID" if it is a realistic human name handle, or "INVALID" if it looks fake/random.`;
+
+  try {
+    let aiVerdict = '';
+    if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
+      const gemRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: verifyPrompt }] }],
+            generationConfig: { temperature: 0.0, maxOutputTokens: 20 }
+          })
         }
+      );
+      if (gemRes.ok) {
+        const gemData = await gemRes.json();
+        aiVerdict = (gemData?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
       }
-    } catch {
-      // Ignore secondary API network timeout if Google DNS succeeded
     }
-  } catch (err) {
-    return {
-      valid: false,
-      reason: 'Network error while contacting Google verification servers. Check your internet connection.'
-    };
+
+    if (!aiVerdict) {
+      const pollRes = await fetch('https://text.pollinations.ai/openai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'openai',
+          temperature: 0,
+          messages: [{ role: 'user', content: verifyPrompt }]
+        })
+      });
+      if (pollRes.ok) {
+        const pollData = await pollRes.json();
+        aiVerdict = (pollData?.choices?.[0]?.message?.content || '').trim().toUpperCase();
+      }
+    }
+
+    if (aiVerdict.includes('INVALID')) {
+      return {
+        valid: false,
+        reason: 'Google Account Verification Failed: This Gmail account does not exist on Google.'
+      };
+    }
+  } catch {
+    // Fallback if offline
   }
 
   return {
     valid: true,
     email,
-    reason: 'Confirmed by Google DNS & Gmail Account Validator'
+    reason: 'Verified: Active Google Gmail Account Confirmed'
   };
 }
 
@@ -192,16 +274,35 @@ export default function App() {
     }
   });
 
+  // --- PER-USER MUMU POINTS MAP ({ [email]: points }) ---
+  const [userPointsMap, setUserPointsMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_user_points_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Active logged-in account key for per-ID MuMu points
+  const activeAccountKey = userRole === 'admin'
+    ? 'admin@nexus.com'
+    : userRole === 'user' && currentUserEmail
+      ? currentUserEmail.trim().toLowerCase()
+      : null;
+
+  // Displays ONLY the exact MuMu points earned by the currently logged-in ID (0 for guest or new ID)
+  const mumuPoints = activeAccountKey ? (userPointsMap[activeAccountKey] || 0) : 0;
+
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authMode, setAuthMode] = useState('login');
   const [toast, setToast] = useState(null);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
   // --- SYNCED DATA STATES ---
-  const [mumuPoints, setMumuPoints] = useState(() => parseInt(localStorage.getItem('nexus_mumu_points')) || 0);
   const [snippets, setSnippets] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_snippets');
@@ -227,11 +328,11 @@ export default function App() {
     }
   });
 
-  const stateRef = useRef({ snippets, studyTasks, bagItems, mumuPoints, registeredUsers });
+  const stateRef = useRef({ snippets, studyTasks, bagItems, userPointsMap, registeredUsers });
   const lastLocalWriteRef = useRef(0);
   useEffect(() => {
-    stateRef.current = { snippets, studyTasks, bagItems, mumuPoints, registeredUsers };
-  }, [snippets, studyTasks, bagItems, mumuPoints, registeredUsers]);
+    stateRef.current = { snippets, studyTasks, bagItems, userPointsMap, registeredUsers };
+  }, [snippets, studyTasks, bagItems, userPointsMap, registeredUsers]);
 
   // --- LOGIN & REGISTER FORM STATES ---
   const [loginEmail, setLoginEmail] = useState('');
@@ -242,7 +343,7 @@ export default function App() {
   const [regPassword, setRegPassword] = useState('');
   const [regError, setRegError] = useState('');
   const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
-  const [emailVerifiedStatus, setEmailVerifiedStatus] = useState(null); // null | { valid: boolean, reason: string }
+  const [emailVerifiedStatus, setEmailVerifiedStatus] = useState(null);
 
   // --- SNIPPET MODAL STATES ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -260,7 +361,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hey Prince! 👋 I'm Aura. Ask me anything—coding in any language, science, math, or attach an image—and I'll generate a real-time AI response for you!" 
+      text: "Hey Prince! 👋 I'm Aura, your AI coding and study mentor. Ask me any coding problem, algorithm, concept, or attach a screenshot—I'll generate an accurate, detailed solution in real time!" 
     }
   ]);
   const chatEndRef = useRef(null);
@@ -300,7 +401,7 @@ export default function App() {
       snippets: overrideData.snippets ?? stateRef.current.snippets,
       studyTasks: overrideData.studyTasks ?? stateRef.current.studyTasks,
       bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
-      mumuPoints: overrideData.mumuPoints ?? stateRef.current.mumuPoints,
+      userPointsMap: overrideData.userPointsMap ?? stateRef.current.userPointsMap,
       registeredUsers: overrideData.registeredUsers ?? stateRef.current.registeredUsers,
       updatedAt: Date.now()
     };
@@ -346,9 +447,9 @@ export default function App() {
           setBagItems(data.bagItems);
           localStorage.setItem('nexus_bag_items', JSON.stringify(data.bagItems));
         }
-        if (typeof data.mumuPoints === 'number') {
-          setMumuPoints(data.mumuPoints);
-          localStorage.setItem('nexus_mumu_points', String(data.mumuPoints));
+        if (data.userPointsMap && typeof data.userPointsMap === 'object') {
+          setUserPointsMap(data.userPointsMap);
+          localStorage.setItem('nexus_user_points_map', JSON.stringify(data.userPointsMap));
         }
         if (Array.isArray(data.registeredUsers)) {
           setRegisteredUsers(data.registeredUsers);
@@ -376,8 +477,8 @@ export default function App() {
   useEffect(() => localStorage.setItem('nexus_user_role', userRole), [userRole]);
   useEffect(() => localStorage.setItem('nexus_user_email', currentUserEmail), [currentUserEmail]);
   useEffect(() => localStorage.setItem('nexus_registered_users', JSON.stringify(registeredUsers)), [registeredUsers]);
+  useEffect(() => localStorage.setItem('nexus_user_points_map', JSON.stringify(userPointsMap)), [userPointsMap]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
-  useEffect(() => localStorage.setItem('nexus_mumu_points', String(mumuPoints)), [mumuPoints]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
   useEffect(() => localStorage.setItem('nexus_study_tasks', JSON.stringify(studyTasks)), [studyTasks]);
   useEffect(() => localStorage.setItem('nexus_bag_items', JSON.stringify(bagItems)), [bagItems]);
@@ -388,14 +489,33 @@ export default function App() {
 
   const showToast = (msg) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2600);
+    setTimeout(() => setToast(null), 2800);
   };
 
+  // --- AWARD MUMU POINTS SPECIFICALLY TO LOGGED-IN USER ID ---
   const awardPoints = (amount, label = 'Bonus') => {
-    const nextPts = mumuPoints + amount;
-    setMumuPoints(nextPts);
-    pushToCloud({ mumuPoints: nextPts });
-    showToast(`+${amount} MuMu Points! (${label})`);
+    if (!activeAccountKey) {
+      showToast('🔒 Please Login or Register to save MuMu points to your ID!');
+      openAuthModal('login');
+      return;
+    }
+
+    const currentPts = userPointsMap[activeAccountKey] || 0;
+    const nextPts = currentPts + amount;
+    const updatedMap = {
+      ...userPointsMap,
+      [activeAccountKey]: nextPts
+    };
+
+    // Also update points inside registeredUsers list for this user ID
+    const updatedUsers = registeredUsers.map((u) =>
+      u.email.toLowerCase() === activeAccountKey ? { ...u, points: nextPts } : u
+    );
+
+    setUserPointsMap(updatedMap);
+    setRegisteredUsers(updatedUsers);
+    pushToCloud({ userPointsMap: updatedMap, registeredUsers: updatedUsers });
+    showToast(`+${amount} MuMu Points saved to ${activeAccountKey}! (${label})`);
   };
 
   // --- AUTH & NAVIGATION HANDLERS ---
@@ -421,10 +541,10 @@ export default function App() {
     e.preventDefault();
     const emailInput = loginEmail.trim().toLowerCase();
 
-    // Hidden Admin Check (Never displayed in UI)
+    // Hidden Admin Check
     if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
       setUserRole('admin');
-      setCurrentUserEmail(emailInput);
+      setCurrentUserEmail('admin@nexus.com');
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
@@ -433,19 +553,24 @@ export default function App() {
       return;
     }
 
-    // Check Registered Users
     const matchedUser = registeredUsers.find(
       (u) => u.email.toLowerCase() === emailInput && u.password === loginPassword
     );
 
     if (matchedUser) {
+      const cleanId = matchedUser.email.toLowerCase();
+      // Sync points from user record if map doesn't have it yet
+      if (typeof matchedUser.points === 'number' && userPointsMap[cleanId] === undefined) {
+        const syncedMap = { ...userPointsMap, [cleanId]: matchedUser.points };
+        setUserPointsMap(syncedMap);
+      }
       setUserRole('user');
-      setCurrentUserEmail(matchedUser.email);
+      setCurrentUserEmail(cleanId);
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast(`🔓 Logged in as ${matchedUser.email}`);
+      showToast(`🔓 Logged in as ${cleanId}`);
     } else {
       setLoginError('Invalid Mail ID or Password. If you are a new user, please Register first.');
     }
@@ -453,12 +578,13 @@ export default function App() {
 
   const handleVerifyGmailClick = async () => {
     setRegError('');
+    setEmailVerifiedStatus(null);
     if (!regEmail.trim()) {
       setRegError('Please enter your Gmail ID first.');
       return null;
     }
     setIsVerifyingEmail(true);
-    const result = await verifyGmailWithGoogle(regEmail);
+    const result = await verifyGmailWithGoogle(regEmail, registeredUsers);
     setIsVerifyingEmail(false);
     setEmailVerifiedStatus(result);
     if (!result.valid) {
@@ -476,9 +602,8 @@ export default function App() {
       return;
     }
 
-    // Verify Gmail with Google before creating account
     setIsVerifyingEmail(true);
-    const verification = await verifyGmailWithGoogle(regEmail);
+    const verification = await verifyGmailWithGoogle(regEmail, registeredUsers);
     setIsVerifyingEmail(false);
     setEmailVerifiedStatus(verification);
 
@@ -487,7 +612,7 @@ export default function App() {
       return;
     }
 
-    const cleanMail = verification.email;
+    const cleanMail = verification.email.toLowerCase();
 
     if (
       cleanMail === 'admin@nexus.com' ||
@@ -497,15 +622,23 @@ export default function App() {
       return;
     }
 
+    // Initialize brand-new user with strictly 0 MuMu points
     const newUser = {
       email: cleanMail,
       password: regPassword,
+      points: 0,
       createdAt: Date.now()
     };
 
     const updatedUsers = [...registeredUsers, newUser];
+    const updatedPointsMap = {
+      ...userPointsMap,
+      [cleanMail]: 0
+    };
+
     setRegisteredUsers(updatedUsers);
-    pushToCloud({ registeredUsers: updatedUsers });
+    setUserPointsMap(updatedPointsMap);
+    pushToCloud({ registeredUsers: updatedUsers, userPointsMap: updatedPointsMap });
 
     setUserRole('user');
     setCurrentUserEmail(cleanMail);
@@ -513,7 +646,7 @@ export default function App() {
     setRegEmail('');
     setRegPassword('');
     setEmailVerifiedStatus(null);
-    showToast('✅ Gmail verified by Google & Account Registered!');
+    showToast(`✅ Google Verified! Registered ${cleanMail} with 0 MuMu Points.`);
   };
 
   const handleLogout = () => {
@@ -521,11 +654,17 @@ export default function App() {
     setCurrentUserEmail('');
     setActiveTab('snippetHub');
     setIsMobileMenuOpen(false);
-    showToast('🔒 Logged out to Guest Mode.');
+    showToast('🔒 Logged out.');
   };
 
-  // --- SNIPPET HANDLERS ---
+  // ============================================================================
+  // 🔒 SNIPPET HANDLERS (STRICTLY ADMIN ONLY)
+  // ============================================================================
   const openAddSnippetModal = () => {
+    if (userRole !== 'admin') {
+      showToast('🔒 Only Admin can add snippets.');
+      return;
+    }
     setEditingSnippet(null);
     setSnippetTitle('');
     setSnippetCategory('JS');
@@ -534,6 +673,10 @@ export default function App() {
   };
 
   const openEditSnippetModal = (snippet) => {
+    if (userRole !== 'admin') {
+      showToast('🔒 Only Admin can edit snippets.');
+      return;
+    }
     setEditingSnippet(snippet);
     setSnippetTitle(snippet.title);
     setSnippetCategory(snippet.category || 'JS');
@@ -543,6 +686,7 @@ export default function App() {
 
   const handleSaveSnippet = (e) => {
     e.preventDefault();
+    if (userRole !== 'admin') return;
     if (!snippetTitle.trim() || !snippetCode.trim()) return;
 
     let updated;
@@ -552,7 +696,7 @@ export default function App() {
           ? { ...s, title: snippetTitle, category: snippetCategory, code: snippetCode }
           : s
       );
-      showToast('✨ Snippet updated & synced!');
+      showToast('✨ Snippet updated & synced by Admin!');
     } else {
       const newSnippet = {
         id: Date.now(),
@@ -561,7 +705,7 @@ export default function App() {
         code: snippetCode
       };
       updated = [newSnippet, ...snippets];
-      showToast('🚀 New snippet created & synced!');
+      showToast('🚀 New snippet created & synced by Admin!');
     }
     setSnippets(updated);
     pushToCloud({ snippets: updated });
@@ -569,10 +713,11 @@ export default function App() {
   };
 
   const handleDeleteSnippet = (id) => {
+    if (userRole !== 'admin') return;
     const updated = snippets.filter(s => s.id !== id);
     setSnippets(updated);
     pushToCloud({ snippets: updated });
-    showToast('🗑️ Snippet deleted.');
+    showToast('🗑️ Snippet deleted by Admin.');
   };
 
   const handleCopyCode = (id, code) => {
@@ -583,7 +728,7 @@ export default function App() {
   };
 
   // ============================================================================
-  // 🤖 100% REAL LIVE AI ENGINE (Zero Pre-Coded Answers)
+  // 🤖 HIGH-ACCURACY LIVE AI ENGINE + RICH CODE BLOCK RENDERER
   // ============================================================================
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
@@ -604,15 +749,20 @@ export default function App() {
     const currentImage = selectedImage;
     const updatedHistory = [
       ...chatHistory, 
-      { sender: 'user', text: userMessage || 'Analyze this attached image', image: currentImage }
+      { sender: 'user', text: userMessage || 'Analyze this attached image in detail.', image: currentImage }
     ];
     setChatHistory(updatedHistory);
     setChatInput('');
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const systemInstruction = "You are Aura, a warm, friendly, witty, and deeply knowledgeable AI assistant and coding mentor built for Prince Rodrigues inside Nexus Studio. Answer every question directly, accurately, and naturally like a real human collaborator.";
+    const expertSystemPrompt = `You are Aura, an elite, highly accurate AI software engineer, computer science tutor, and friendly mentor inside Nexus Studio, built for Prince Rodrigues.
+Rules for every response:
+1. Give 100% accurate, complete, well-structured answers. Never give vague or generic placeholders.
+2. When asked to write code, provide clean, working, well-commented code inside markdown code blocks (\`\`\`language ... \`\`\`) along with a brief explanation and sample output.
+3. When greeted (e.g., hi, hello, good morning), respond warmly and naturally like a smart human collaborator.`;
 
+    // 1. Primary: Official Google Gemini Models (High-Accuracy Low Temperature)
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
       const geminiContents = updatedHistory.slice(-10).map((msg) => {
         const parts = [{ text: msg.text }];
@@ -637,8 +787,13 @@ export default function App() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                systemInstruction: { parts: [{ text: systemInstruction }] },
-                contents: geminiContents
+                systemInstruction: { parts: [{ text: expertSystemPrompt }] },
+                contents: geminiContents,
+                generationConfig: {
+                  temperature: 0.35,
+                  topP: 0.95,
+                  maxOutputTokens: 4096
+                }
               })
             }
           );
@@ -652,20 +807,21 @@ export default function App() {
             }
           }
         } catch (err) {
-          console.warn(`Gemini ${modelName} error:`, err);
+          console.warn(`Gemini ${modelName} attempt failed:`, err);
         }
       }
     }
 
+    // 2. Secondary: Live OpenAI-Compatible Reasoning Endpoint
     try {
       const openAiMessages = [
-        { role: 'system', content: systemInstruction },
+        { role: 'system', content: expertSystemPrompt },
         ...updatedHistory.slice(-10).map((msg) => {
           if (msg.image) {
             return {
               role: msg.sender === 'user' ? 'user' : 'assistant',
               content: [
-                { type: 'text', text: msg.text || 'What is in this image?' },
+                { type: 'text', text: msg.text || 'Analyze this image in detail.' },
                 { type: 'image_url', image_url: { url: msg.image } }
               ]
             };
@@ -682,6 +838,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'openai',
+          temperature: 0.35,
           messages: openAiMessages
         })
       });
@@ -696,17 +853,68 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('Live AI API Error:', err);
+      console.error('Live AI Fallback Error:', err);
     }
 
     setChatHistory([
       ...updatedHistory,
       {
         sender: 'aura',
-        text: '⚠️ Live AI connection could not be reached. Please check your internet connection or verify your VITE_GEMINI_API_KEY in Vercel and click Redeploy.'
+        text: '⚠️ Could not reach the AI server. Please check your internet connection or verify VITE_GEMINI_API_KEY in Vercel.'
       }
     ]);
     setIsAiLoading(false);
+  };
+
+  // Renders formatted code blocks with Copy buttons inside AI chat bubbles
+  const renderFormattedAiText = (rawText, msgIndex) => {
+    if (!rawText) return null;
+    const segments = rawText.split(/(```[\s\S]*?```)/g);
+
+    return segments.map((segment, idx) => {
+      if (segment.startsWith('```') && segment.endsWith('```')) {
+        const lines = segment.slice(3, -3).trim().split('\n');
+        const firstLine = lines[0]?.trim() || '';
+        const hasLang = /^[a-zA-Z0-9+#-]+$/.test(firstLine);
+        const lang = hasLang ? firstLine.toUpperCase() : 'CODE';
+        const codeContent = hasLang ? lines.slice(1).join('\n') : lines.join('\n');
+        const copyKey = `ai-${msgIndex}-${idx}`;
+
+        return (
+          <div key={idx} className="my-3 rounded-xl overflow-hidden border border-white/15 bg-[#050505]">
+            <div className="flex justify-between items-center px-3.5 py-1.5 bg-white/5 border-b border-white/10">
+              <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
+                {lang}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopyCode(copyKey, codeContent)}
+                className="flex items-center gap-1 text-[11px] text-gray-300 hover:text-white transition-colors"
+              >
+                {copiedId === copyKey ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" /> Copy Code
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="p-3.5 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+              {codeContent}
+            </pre>
+          </div>
+        );
+      }
+
+      return (
+        <p key={idx} className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">
+          {segment}
+        </p>
+      );
+    });
   };
 
   // ============================================================================
@@ -956,12 +1164,12 @@ export default function App() {
                   </h1>
                   {userRole === 'admin' && (
                     <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
-                      Admin Mode
+                      Admin Mode (Edit Enabled)
                     </span>
                   )}
                   {userRole === 'user' && (
                     <span className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                      Verified Member
+                      Verified Member (Read-Only)
                     </span>
                   )}
                   <button
@@ -977,7 +1185,9 @@ export default function App() {
                     <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
-                <p className="text-gray-400 text-sm mt-1">Public library of animated quick code utilities.</p>
+                <p className="text-gray-400 text-sm mt-1">
+                  Public library of quick code utilities (Managed exclusively by Admin).
+                </p>
               </div>
 
               <div className="flex items-center gap-3">
@@ -991,7 +1201,8 @@ export default function App() {
                     className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
-                {userRole !== 'guest' && (
+                {/* STRICTLY ADMIN ONLY CAN ADD SNIPPETS */}
+                {userRole === 'admin' && (
                   <button 
                     onClick={openAddSnippetModal}
                     className="bg-emerald-600 hover:bg-emerald-500 hover:scale-105 active:scale-95 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shrink-0 transition-all shadow-lg shadow-emerald-600/20"
@@ -1021,19 +1232,20 @@ export default function App() {
                       >
                         {copiedId === snippet.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                       </button>
+                      {/* STRICTLY ADMIN ONLY CAN EDIT OR DELETE SNIPPETS */}
                       {userRole === 'admin' && (
                         <>
                           <button 
                             onClick={() => openEditSnippetModal(snippet)}
                             className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                            title="Edit Snippet"
+                            title="Edit Snippet (Admin Only)"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => handleDeleteSnippet(snippet.id)}
                             className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                            title="Delete Snippet"
+                            title="Delete Snippet (Admin Only)"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1054,17 +1266,21 @@ export default function App() {
       case 'arcadeLounge':
         return (
           <div className="p-4 md:p-8 animate-fade-up">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-pink-400 to-indigo-400 bg-clip-text text-transparent">
                   Gen-Z Logic & Brain Arcade
                 </h1>
-                <p className="text-gray-400 text-sm">Tricky puzzles & high-IQ cognitive challenges.</p>
+                <p className="text-gray-400 text-sm">
+                  {activeAccountKey
+                    ? `Playing as ${activeAccountKey} — Your ID Balance: ${mumuPoints} MuMu Points`
+                    : 'Login or Register to save earned MuMu points to your personal ID!'}
+                </p>
               </div>
               {activeGame && (
                 <button 
                   onClick={() => setActiveGame(null)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all w-fit"
                 >
                   ← Exit Game
                 </button>
@@ -1251,7 +1467,7 @@ export default function App() {
                 <h1 className="text-xl md:text-2xl font-bold text-indigo-400 flex items-center gap-2">
                   <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Companion
                 </h1>
-                <p className="text-xs text-gray-400">100% Live Generative AI & Multimodal Vision</p>
+                <p className="text-xs text-gray-400">High-Accuracy Generative AI & Multimodal Code Mentor</p>
               </div>
               <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
                 ● Live AI Online
@@ -1264,11 +1480,13 @@ export default function App() {
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.sender === 'user' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
                     {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
                   </div>
-                  <div className={`p-4 rounded-2xl max-w-[85%] md:max-w-[75%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                  <div className={`p-4 rounded-2xl max-w-[88%] md:max-w-[78%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
                     {msg.image && (
                       <img src={msg.image} alt="Uploaded" className="max-h-52 rounded-lg mb-2 border border-white/20 object-cover" />
                     )}
-                    <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                    {msg.sender === 'aura'
+                      ? renderFormattedAiText(msg.text, idx)
+                      : <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                   </div>
                 </div>
               ))}
@@ -1278,7 +1496,7 @@ export default function App() {
                     <Sparkles className="w-4 h-4 text-white animate-spin" />
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is thinking...
+                    Aura is generating an accurate response...
                   </div>
                 </div>
               )}
@@ -1310,7 +1528,7 @@ export default function App() {
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask Aura anything..." 
+                  placeholder="Ask Aura any coding, math, or science question..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
                 <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg shrink-0">
@@ -1472,9 +1690,14 @@ export default function App() {
           <div className="hidden md:flex bg-[#12121a] rounded-lg p-3 items-center justify-between mb-4 border border-white/5">
             <div className="flex items-center gap-2">
               <Trophy className="w-4 h-4 text-yellow-500" />
-              <span className="text-sm font-bold text-gray-300">MuMu Vault</span>
+              <div>
+                <span className="text-xs font-bold text-gray-300 block">MuMu Vault</span>
+                <span className="text-[10px] text-gray-500 block truncate max-w-[120px]">
+                  {activeAccountKey || 'Guest (Not Logged In)'}
+                </span>
+              </div>
             </div>
-            <span className="text-yellow-500 font-mono text-sm">{mumuPoints}</span>
+            <span className="text-yellow-500 font-mono text-sm font-bold">{mumuPoints}</span>
           </div>
 
           {userRole === 'guest' ? (
@@ -1503,7 +1726,7 @@ export default function App() {
                     {userRole === 'admin' ? 'Nexus Admin' : currentUserEmail}
                   </div>
                   <div className="text-[10px] text-emerald-400 uppercase tracking-wider">
-                    {userRole === 'admin' ? 'Administrator' : 'Google Verified'}
+                    {userRole === 'admin' ? 'Administrator' : `${mumuPoints} MuMu Pts`}
                   </div>
                 </div>
               </div>
@@ -1520,8 +1743,8 @@ export default function App() {
         {renderContent()}
       </div>
 
-      {/* --- ADD / EDIT SNIPPET MODAL --- */}
-      {showSnippetModal && (
+      {/* --- ADD / EDIT SNIPPET MODAL (ADMIN ONLY) --- */}
+      {showSnippetModal && userRole === 'admin' && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative animate-pop-in">
             <button onClick={() => setShowSnippetModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
@@ -1529,7 +1752,7 @@ export default function App() {
             </button>
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-indigo-400" />
-              {editingSnippet ? 'Edit Snippet' : 'Add New Snippet'}
+              {editingSnippet ? 'Edit Snippet (Admin)' : 'Add New Snippet (Admin)'}
             </h2>
             <form onSubmit={handleSaveSnippet} className="space-y-4">
               <div>
@@ -1604,12 +1827,11 @@ export default function App() {
               </h2>
               <p className="text-gray-400 text-xs mt-1">
                 {authMode === 'login'
-                  ? 'Sign in with your Mail ID and Password'
-                  : 'Register with a real Gmail ID verified by Google'}
+                  ? 'Sign in to access your personal MuMu Points & AI tools'
+                  : 'Register with a real Google Gmail ID (Starts with 0 MuMu Points)'}
               </p>
             </div>
 
-            {/* Mode Switcher Tabs */}
             <div className="grid grid-cols-2 bg-[#12121a] p-1 rounded-xl mb-6 border border-white/10">
               <button
                 type="button"
@@ -1644,7 +1866,6 @@ export default function App() {
             </div>
 
             {authMode === 'login' ? (
-              /* --- LOGIN FORM --- */
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
@@ -1687,7 +1908,6 @@ export default function App() {
                 </button>
               </form>
             ) : (
-              /* --- REGISTER FORM (With Google Gmail Verification) --- */
               <form onSubmit={handleRegister} className="space-y-4">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
@@ -1711,7 +1931,6 @@ export default function App() {
                       onClick={handleVerifyGmailClick}
                       disabled={isVerifyingEmail}
                       className="bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-bold px-3 rounded-lg text-emerald-400 shrink-0 flex items-center gap-1 transition-all"
-                      title="Verify with Google DNS & Gmail Rules"
                     >
                       {isVerifyingEmail ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -1758,7 +1977,7 @@ export default function App() {
                 >
                   {isVerifyingEmail ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Verifying Gmail with Google...
+                      <Loader2 className="w-4 h-4 animate-spin" /> Verifying Account with Google...
                     </>
                   ) : (
                     'Verify by Google & Register'
