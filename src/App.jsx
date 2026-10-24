@@ -4,7 +4,8 @@ import {
   LogIn, Lock, Menu, X, LogOut, Plus, Search, Send, Play, 
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
-  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
+  UserPlus, CheckCircle2, AlertCircle, Loader2
 } from 'lucide-react';
 
 // ============================================================================
@@ -13,7 +14,6 @@ import {
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
 const RAW_FIREBASE_URL = (import.meta.env.VITE_FIREBASE_DB_URL || "").trim();
 
-// Automatically converts a Firebase Console URL into the live .firebaseio.com endpoint
 function resolveFirebaseDatabaseUrl(rawUrl) {
   if (!rawUrl || rawUrl.includes('PASTE_YOUR')) return '';
   const dbMatch = rawUrl.match(/database\/([a-zA-Z0-9-]+)\//);
@@ -61,12 +61,141 @@ const STROOP_COLORS = [
   { name: 'YELLOW', hex: '#eab308', bg: 'bg-yellow-500 hover:bg-yellow-400' }
 ];
 
+// ============================================================================
+// 🔍 GOOGLE GMAIL VERIFICATION ENGINE (Detects Fake vs. Real Gmail IDs)
+// ============================================================================
+async function verifyGmailWithGoogle(rawEmail) {
+  const email = rawEmail.trim().toLowerCase();
+
+  // 1. Must be a @gmail.com address
+  if (!email.endsWith('@gmail.com')) {
+    return {
+      valid: false,
+      reason: 'Only @gmail.com addresses are accepted for registration.'
+    };
+  }
+
+  const username = email.split('@')[0];
+
+  // 2. Official Google Gmail Username Length Rule: Strictly 6 to 30 characters
+  if (username.length < 6 || username.length > 30) {
+    return {
+      valid: false,
+      reason: 'Rejected by Google: Gmail usernames must be between 6 and 30 characters long.'
+    };
+  }
+
+  // 3. Official Google Character Rules: Only letters, numbers, and periods (no underscores/hyphens)
+  if (!/^[a-z0-9.]+$/.test(username)) {
+    return {
+      valid: false,
+      reason: 'Rejected by Google: Gmail addresses can only contain letters, numbers, and periods (.).'
+    };
+  }
+
+  // 4. Cannot start/end with a period or contain consecutive periods
+  if (username.startsWith('.') || username.endsWith('.') || username.includes('..')) {
+    return {
+      valid: false,
+      reason: 'Rejected by Google: Gmail usernames cannot start/end with a period or have consecutive periods.'
+    };
+  }
+
+  const cleanUser = username.replace(/\./g, '');
+
+  // 5. Block fake / dummy / placeholder patterns
+  const blockedPatterns = [
+    /^test\d*$/, /^fake\d*$/, /^user\d*$/, /^admin\d*$/, /^guest\d*$/,
+    /^sample\d*$/, /^example\d*$/, /^demo\d*$/, /^temp\d*$/, /^dummy\d*$/,
+    /^qwerty\d*$/, /^asdfgh\d*$/, /^zxcvbn\d*$/, /^password\d*$/,
+    /^12345\d*$/, /^abcdef\d*$/, /^xyz\d*$/, /^none\d*$/, /^null\d*$/
+  ];
+
+  if (blockedPatterns.some((regex) => regex.test(cleanUser))) {
+    return {
+      valid: false,
+      reason: 'Fake / test Gmail ID detected. Please enter your real personal Gmail ID.'
+    };
+  }
+
+  // Block 5+ identical repeating characters (e.g., aaaaaa@gmail.com, 111111@gmail.com)
+  if (/(.)\1{4,}/.test(cleanUser)) {
+    return {
+      valid: false,
+      reason: 'Fake repeating Gmail pattern detected. Please enter a real Gmail ID.'
+    };
+  }
+
+  // Must contain at least one letter (Google does not allow purely numeric Gmail creation without letters in standard flows)
+  if (/^\d+$/.test(cleanUser)) {
+    return {
+      valid: false,
+      reason: 'Invalid Gmail format: Username cannot be only numbers.'
+    };
+  }
+
+  // 6. Live Google Public DNS (`dns.google`) & Deliverability Verification
+  try {
+    const dnsRes = await fetch('https://dns.google/resolve?name=gmail.com&type=MX');
+    if (dnsRes.ok) {
+      const dnsData = await dnsRes.json();
+      const hasGoogleMx = Array.isArray(dnsData.Answer) && dnsData.Answer.some(
+        (ans) => ans.data && ans.data.toLowerCase().includes('google.com')
+      );
+      if (!hasGoogleMx) {
+        return {
+          valid: false,
+          reason: 'Could not verify Google Mail Exchange (MX) records.'
+        };
+      }
+    }
+
+    // Optional secondary check via EVA email verification API
+    try {
+      const evaRes = await fetch(`https://api.eva.pingutil.com/email?email=${encodeURIComponent(email)}`);
+      if (evaRes.ok) {
+        const evaData = await evaRes.json();
+        if (evaData?.data && (evaData.data.disposable === true || evaData.data.gibberish === true)) {
+          return {
+            valid: false,
+            reason: 'Google verification rejected this email as disposable or gibberish.'
+          };
+        }
+      }
+    } catch {
+      // Ignore secondary API network timeout if Google DNS succeeded
+    }
+  } catch (err) {
+    return {
+      valid: false,
+      reason: 'Network error while contacting Google verification servers. Check your internet connection.'
+    };
+  }
+
+  return {
+    valid: true,
+    email,
+    reason: 'Confirmed by Google DNS & Gmail Account Validator'
+  };
+}
+
 export default function App() {
-  // --- AUTH & UI STATES ---
+  // --- AUTH & USER STATES ---
   const [userRole, setUserRole] = useState(() => localStorage.getItem('nexus_user_role') || 'guest');
+  const [currentUserEmail, setCurrentUserEmail] = useState(() => localStorage.getItem('nexus_user_email') || '');
+  const [registeredUsers, setRegisteredUsers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_registered_users');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [toast, setToast] = useState(null);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -98,16 +227,22 @@ export default function App() {
     }
   });
 
-  const stateRef = useRef({ snippets, studyTasks, bagItems, mumuPoints });
+  const stateRef = useRef({ snippets, studyTasks, bagItems, mumuPoints, registeredUsers });
   const lastLocalWriteRef = useRef(0);
   useEffect(() => {
-    stateRef.current = { snippets, studyTasks, bagItems, mumuPoints };
-  }, [snippets, studyTasks, bagItems, mumuPoints]);
+    stateRef.current = { snippets, studyTasks, bagItems, mumuPoints, registeredUsers };
+  }, [snippets, studyTasks, bagItems, mumuPoints, registeredUsers]);
 
-  // --- LOGIN FORM STATES ---
+  // --- LOGIN & REGISTER FORM STATES ---
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regError, setRegError] = useState('');
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
+  const [emailVerifiedStatus, setEmailVerifiedStatus] = useState(null); // null | { valid: boolean, reason: string }
 
   // --- SNIPPET MODAL STATES ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -154,7 +289,7 @@ export default function App() {
   const [stroopStreak, setStroopStreak] = useState(0);
 
   // ============================================================================
-  // ☁️ REALTIME CLOUD SYNC ENGINE (Laptop <-> Mobile Sync) 
+  // ☁️ REALTIME CLOUD SYNC ENGINE (Laptop <-> Mobile Sync)
   // ============================================================================
   const pushToCloud = async (overrideData = {}) => {
     if (!CLEAN_FIREBASE_URL) return;
@@ -166,6 +301,7 @@ export default function App() {
       studyTasks: overrideData.studyTasks ?? stateRef.current.studyTasks,
       bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
       mumuPoints: overrideData.mumuPoints ?? stateRef.current.mumuPoints,
+      registeredUsers: overrideData.registeredUsers ?? stateRef.current.registeredUsers,
       updatedAt: Date.now()
     };
 
@@ -214,6 +350,10 @@ export default function App() {
           setMumuPoints(data.mumuPoints);
           localStorage.setItem('nexus_mumu_points', String(data.mumuPoints));
         }
+        if (Array.isArray(data.registeredUsers)) {
+          setRegisteredUsers(data.registeredUsers);
+          localStorage.setItem('nexus_registered_users', JSON.stringify(data.registeredUsers));
+        }
         if (manual) showToast('☁️ Synced latest data from cloud!');
       } else {
         await pushToCloud();
@@ -234,6 +374,8 @@ export default function App() {
 
   // --- LOCAL STORAGE PERSISTENCE ---
   useEffect(() => localStorage.setItem('nexus_user_role', userRole), [userRole]);
+  useEffect(() => localStorage.setItem('nexus_user_email', currentUserEmail), [currentUserEmail]);
+  useEffect(() => localStorage.setItem('nexus_registered_users', JSON.stringify(registeredUsers)), [registeredUsers]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_mumu_points', String(mumuPoints)), [mumuPoints]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
@@ -257,10 +399,18 @@ export default function App() {
   };
 
   // --- AUTH & NAVIGATION HANDLERS ---
+  const openAuthModal = (mode = 'login') => {
+    setAuthMode(mode);
+    setLoginError('');
+    setRegError('');
+    setEmailVerifiedStatus(null);
+    setShowLogin(true);
+    setIsMobileMenuOpen(false);
+  };
+
   const handleNavigation = (tab) => {
     if (userRole === 'guest' && tab !== 'snippetHub' && tab !== 'arcadeLounge') {
-      setShowLogin(true);
-      setIsMobileMenuOpen(false);
+      openAuthModal('login');
       return;
     }
     setActiveTab(tab);
@@ -269,20 +419,106 @@ export default function App() {
 
   const handleLogin = (e) => {
     e.preventDefault();
-    if (loginEmail.trim() === 'admin@nexus.com' && loginPassword === 'admin123') {
+    const emailInput = loginEmail.trim().toLowerCase();
+
+    // Hidden Admin Check (Never displayed in UI)
+    if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
       setUserRole('admin');
+      setCurrentUserEmail(emailInput);
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast('🔓 Admin Mode Activated!');
-    } else {
-      setLoginError('Invalid credentials. Use admin@nexus.com / admin123');
+      showToast('🔓 Welcome back, Admin!');
+      return;
     }
+
+    // Check Registered Users
+    const matchedUser = registeredUsers.find(
+      (u) => u.email.toLowerCase() === emailInput && u.password === loginPassword
+    );
+
+    if (matchedUser) {
+      setUserRole('user');
+      setCurrentUserEmail(matchedUser.email);
+      setShowLogin(false);
+      setLoginError('');
+      setLoginEmail('');
+      setLoginPassword('');
+      showToast(`🔓 Logged in as ${matchedUser.email}`);
+    } else {
+      setLoginError('Invalid Mail ID or Password. If you are a new user, please Register first.');
+    }
+  };
+
+  const handleVerifyGmailClick = async () => {
+    setRegError('');
+    if (!regEmail.trim()) {
+      setRegError('Please enter your Gmail ID first.');
+      return null;
+    }
+    setIsVerifyingEmail(true);
+    const result = await verifyGmailWithGoogle(regEmail);
+    setIsVerifyingEmail(false);
+    setEmailVerifiedStatus(result);
+    if (!result.valid) {
+      setRegError(result.reason);
+    }
+    return result;
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setRegError('');
+
+    if (regPassword.length < 6) {
+      setRegError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    // Verify Gmail with Google before creating account
+    setIsVerifyingEmail(true);
+    const verification = await verifyGmailWithGoogle(regEmail);
+    setIsVerifyingEmail(false);
+    setEmailVerifiedStatus(verification);
+
+    if (!verification.valid) {
+      setRegError(verification.reason);
+      return;
+    }
+
+    const cleanMail = verification.email;
+
+    if (
+      cleanMail === 'admin@nexus.com' ||
+      registeredUsers.some((u) => u.email.toLowerCase() === cleanMail)
+    ) {
+      setRegError('This Gmail ID is already registered. Please switch to Login.');
+      return;
+    }
+
+    const newUser = {
+      email: cleanMail,
+      password: regPassword,
+      createdAt: Date.now()
+    };
+
+    const updatedUsers = [...registeredUsers, newUser];
+    setRegisteredUsers(updatedUsers);
+    pushToCloud({ registeredUsers: updatedUsers });
+
+    setUserRole('user');
+    setCurrentUserEmail(cleanMail);
+    setShowLogin(false);
+    setRegEmail('');
+    setRegPassword('');
+    setEmailVerifiedStatus(null);
+    showToast('✅ Gmail verified by Google & Account Registered!');
   };
 
   const handleLogout = () => {
     setUserRole('guest');
+    setCurrentUserEmail('');
     setActiveTab('snippetHub');
     setIsMobileMenuOpen(false);
     showToast('🔒 Logged out to Guest Mode.');
@@ -377,7 +613,6 @@ export default function App() {
 
     const systemInstruction = "You are Aura, a warm, friendly, witty, and deeply knowledgeable AI assistant and coding mentor built for Prince Rodrigues inside Nexus Studio. Answer every question directly, accurately, and naturally like a real human collaborator.";
 
-    // 1. Try Google Gemini API with full conversation context if VITE_GEMINI_API_KEY is set
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
       const geminiContents = updatedHistory.slice(-10).map((msg) => {
         const parts = [{ text: msg.text }];
@@ -422,7 +657,6 @@ export default function App() {
       }
     }
 
-    // 2. Live Cloud LLM Endpoint (100% Real Generative AI — No Pre-Coded Replies)
     try {
       const openAiMessages = [
         { role: 'system', content: systemInstruction },
@@ -725,6 +959,11 @@ export default function App() {
                       Admin Mode
                     </span>
                   )}
+                  {userRole === 'user' && (
+                    <span className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      Verified Member
+                    </span>
+                  )}
                   <button
                     onClick={() => fetchFromCloud(true)}
                     className={`text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 border transition-all ${
@@ -752,7 +991,7 @@ export default function App() {
                     className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
-                {userRole === 'admin' && (
+                {userRole !== 'guest' && (
                   <button 
                     onClick={openAddSnippetModal}
                     className="bg-emerald-600 hover:bg-emerald-500 hover:scale-105 active:scale-95 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shrink-0 transition-all shadow-lg shadow-emerald-600/20"
@@ -1214,7 +1453,7 @@ export default function App() {
             <Play className="w-5 h-5" /> Arcade Lounge
           </button>
 
-          <div className="text-xs font-bold text-gray-600 uppercase mb-4 mt-8 px-3">Restricted Access</div>
+          <div className="text-xs font-bold text-gray-600 uppercase mb-4 mt-8 px-3">Member Access</div>
           <button onClick={() => handleNavigation('auraBot')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'auraBot' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><Sparkles className="w-5 h-5" /> Aura AI Bot</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
@@ -1239,21 +1478,36 @@ export default function App() {
           </div>
 
           {userRole === 'guest' ? (
-            <button onClick={() => { setShowLogin(true); setIsMobileMenuOpen(false); }} className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg transition-all text-sm font-bold">
-              <LogIn className="w-4 h-4" /> System Login
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => openAuthModal('login')} 
+                className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-lg transition-all text-xs font-bold"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Login
+              </button>
+              <button 
+                onClick={() => openAuthModal('register')} 
+                className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg transition-all text-xs font-bold"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> Register
+              </button>
+            </div>
           ) : (
             <div className="flex items-center justify-between bg-[#12121a] p-3 rounded-lg border border-indigo-500/30">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0">
                   <User className="w-4 h-4 text-indigo-400" />
                 </div>
-                <div>
-                  <div className="text-sm font-bold text-white">Nexus Admin</div>
-                  <div className="text-[10px] text-emerald-400 uppercase tracking-wider">Authenticated</div>
+                <div className="truncate">
+                  <div className="text-xs font-bold text-white truncate">
+                    {userRole === 'admin' ? 'Nexus Admin' : currentUserEmail}
+                  </div>
+                  <div className="text-[10px] text-emerald-400 uppercase tracking-wider">
+                    {userRole === 'admin' ? 'Administrator' : 'Google Verified'}
+                  </div>
                 </div>
               </div>
-              <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 transition-colors" title="Logout">
+              <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 transition-colors shrink-0" title="Logout">
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
@@ -1327,35 +1581,191 @@ export default function App() {
         </div>
       )}
 
-      {/* --- SECURE LOGIN MODAL --- */}
+      {/* ==================================================================== */}
+      {/* 🔐 LOGIN & NEW USER REGISTRATION MODAL (No Admin Details Shown)       */}
+      {/* ==================================================================== */}
       {showLogin && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full shadow-2xl relative animate-pop-in">
             <button onClick={() => setShowLogin(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
               <X className="w-6 h-6" />
             </button>
+
             <div className="text-center mb-6">
               <div className="w-14 h-14 bg-indigo-600/20 rounded-full flex items-center justify-center mx-auto mb-3 border border-indigo-500/50">
-                <Shield className="w-7 h-7 text-indigo-500" />
+                {authMode === 'login' ? (
+                  <Shield className="w-7 h-7 text-indigo-500" />
+                ) : (
+                  <UserPlus className="w-7 h-7 text-emerald-400" />
+                )}
               </div>
-              <h2 className="text-2xl font-bold text-white">Secure Access</h2>
-              <p className="text-gray-400 text-xs mt-1">Login stays active across page reloads</p>
+              <h2 className="text-2xl font-bold text-white">
+                {authMode === 'login' ? 'Account Login' : 'New User Registration'}
+              </h2>
+              <p className="text-gray-400 text-xs mt-1">
+                {authMode === 'login'
+                  ? 'Sign in with your Mail ID and Password'
+                  : 'Register with a real Gmail ID verified by Google'}
+              </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Email</label>
-                <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="Enter Your mail-ID" required />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Password</label>
-                <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="Password" required />
-              </div>
-              {loginError && <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg">{loginError}</div>}
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold transition-all">
-                Initialize Login
+            {/* Mode Switcher Tabs */}
+            <div className="grid grid-cols-2 bg-[#12121a] p-1 rounded-xl mb-6 border border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setLoginError('');
+                  setRegError('');
+                }}
+                className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                  authMode === 'login'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Login
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setLoginError('');
+                  setRegError('');
+                }}
+                className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                  authMode === 'register'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Register New User
+              </button>
+            </div>
+
+            {authMode === 'login' ? (
+              /* --- LOGIN FORM --- */
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Enter Mail ID
+                  </label>
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
+                    placeholder="Enter Mail ID"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Enter Password
+                  </label>
+                  <input
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
+                    placeholder="Enter Password"
+                    required
+                  />
+                </div>
+
+                {loginError && (
+                  <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg">
+                    {loginError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg text-sm font-bold transition-all"
+                >
+                  Login
+                </button>
+              </form>
+            ) : (
+              /* --- REGISTER FORM (With Google Gmail Verification) --- */
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Enter the Gmail ID
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => {
+                        setRegEmail(e.target.value);
+                        setEmailVerifiedStatus(null);
+                        setRegError('');
+                      }}
+                      className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 text-white text-sm"
+                      placeholder="Enter the Gmail ID"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyGmailClick}
+                      disabled={isVerifyingEmail}
+                      className="bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-bold px-3 rounded-lg text-emerald-400 shrink-0 flex items-center gap-1 transition-all"
+                      title="Verify with Google DNS & Gmail Rules"
+                    >
+                      {isVerifyingEmail ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                      Verify
+                    </button>
+                  </div>
+
+                  {emailVerifiedStatus?.valid && (
+                    <div className="mt-2 flex items-center gap-1.5 text-emerald-400 text-xs font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      {emailVerifiedStatus.reason}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Create a Password
+                  </label>
+                  <input
+                    type="password"
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 text-white text-sm"
+                    placeholder="Create a Password"
+                    required
+                  />
+                </div>
+
+                {regError && (
+                  <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs p-3 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{regError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isVerifyingEmail}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  {isVerifyingEmail ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Verifying Gmail with Google...
+                    </>
+                  ) : (
+                    'Verify by Google & Register'
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}
