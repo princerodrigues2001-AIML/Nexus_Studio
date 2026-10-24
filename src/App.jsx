@@ -154,7 +154,7 @@ export default function App() {
   const [stroopStreak, setStroopStreak] = useState(0);
 
   // ============================================================================
-  // ☁️ REALTIME CLOUD SYNC ENGINE (Laptop <-> Mobile Sync)
+  // ☁️ REALTIME CLOUD SYNC ENGINE (Laptop <-> Mobile Sync) 
   // ============================================================================
   const pushToCloud = async (overrideData = {}) => {
     if (!CLEAN_FIREBASE_URL) return;
@@ -1345,11 +1345,11 @@ export default function App() {
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Email</label>
-                <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="admin@nexus.com" required />
+                <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="Enter Your mail-ID" required />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Password</label>
-                <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="••••••••" required />
+                <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm" placeholder="Password" required />
               </div>
               {loginError && <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-xs text-center p-3 rounded-lg">{loginError}</div>}
               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg text-sm font-bold transition-all">
