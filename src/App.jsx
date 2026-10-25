@@ -5,14 +5,12 @@ import {
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
-  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp
+  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare
 } from 'lucide-react';
 
-// ============================================================================
-// 🔐 ENVIRONMENT VARIABLES (Set in Vercel -> Settings -> Environment Variables)
-// ============================================================================
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
 const RAW_FIREBASE_URL = (import.meta.env.VITE_FIREBASE_DB_URL || "").trim();
+
 function resolveFirebaseDatabaseUrl(rawUrl) {
   if (!rawUrl || rawUrl.includes('PASTE_YOUR')) return '';
   const dbMatch = rawUrl.match(/database\/([a-zA-Z0-9-]+)\//);
@@ -31,7 +29,6 @@ function resolveFirebaseDatabaseUrl(rawUrl) {
 
 const CLEAN_FIREBASE_URL = resolveFirebaseDatabaseUrl(RAW_FIREBASE_URL);
 
-// Converts an email into a Firebase-safe key (Firebase forbids '.', '#', '$', '[', ']' in keys)
 function emailToFirebaseKey(email) {
   if (!email) return '';
   return email.trim().toLowerCase().replace(/\./g, '_dot_').replace(/@/g, '_at_').replace(/[^a-z0-9_]/g, '_');
@@ -55,7 +52,7 @@ const DEFAULT_TASKS = [
 
 const DEFAULT_BAG = [
   { id: 1, text: 'Laptop & Charger', packed: true },
-  { id: 2, text: 'College ID & Notebook', packed: false }
+  { id: 2, text: 'ID Card & Notebook', packed: false }
 ];
 
 const CODELE_WORDS = [
@@ -71,41 +68,24 @@ const STROOP_COLORS = [
   { name: 'YELLOW', hex: '#eab308', bg: 'bg-yellow-500 hover:bg-yellow-400' }
 ];
 
-// ============================================================================
-// 🔍 GOOGLE ACCOUNT EXISTENCE & AUTHENTICITY VERIFIER
-// ============================================================================
 async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   const email = rawEmail.trim().toLowerCase();
-
   const parts = email.split('@');
   if (parts.length !== 2 || parts[1] !== 'gmail.com' || !parts[0]) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Please enter a valid @gmail.com address.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Please enter a valid @gmail.com address.' };
   }
 
   const username = parts[0];
-
   if (username.length < 6 || username.length > 30) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: This Gmail account does not exist (usernames must be 6–30 characters).'
-    };
+    return { valid: false, reason: 'Google Verification Failed: This Gmail account does not exist (usernames must be 6–30 characters).' };
   }
 
   if (!/^[a-z0-9.]+$/.test(username)) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Invalid characters in Gmail address.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Invalid characters in Gmail address.' };
   }
 
   if (username.startsWith('.') || username.endsWith('.') || username.includes('..')) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Invalid period placement in Gmail address.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Invalid period placement in Gmail address.' };
   }
 
   const cleanUser = username.replace(/\./g, '');
@@ -113,17 +93,11 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   const digitsOnly = cleanUser.replace(/[^0-9]/g, '');
 
   if (!/^[a-z]/.test(cleanUser) || lettersOnly.length < 4) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   if (digitsOnly.length > lettersOnly.length || digitsOnly.length > 6) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   const forbiddenSubstrings = [
@@ -139,27 +113,18 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   ];
 
   if (forbiddenSubstrings.some((sub) => cleanUser.includes(sub))) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   if (/(.)\1{2,}/.test(cleanUser) || /[a-z]\d[a-z]\d/.test(cleanUser)) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   const vowels = (lettersOnly.match(/[aeiouy]/g) || []).length;
   const vowelRatio = vowels / lettersOnly.length;
 
   if (vowelRatio < 0.22 || vowelRatio > 0.75) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   if (
@@ -167,18 +132,11 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     /[jqwxz]{2,}/.test(lettersOnly) || 
     /[bcdfghjklmnpqrstvwxz]{4}$/.test(lettersOnly)
   ) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
+    return { valid: false, reason: 'Google Verification Failed: Account does not exist on Google.' };
   }
 
   if (existingUsers.some((u) => u.email.toLowerCase() === email)) {
-    return {
-      valid: true,
-      email,
-      reason: 'Verified Google Account'
-    };
+    return { valid: true, email, reason: 'Verified Google Account' };
   }
 
   try {
@@ -186,25 +144,15 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     if (disifyRes.ok) {
       const disifyData = await disifyRes.json();
       if (disifyData.format === false || disifyData.dns === false || disifyData.disposable === true) {
-        return {
-          valid: false,
-          reason: 'Google Verification Failed: Account is undeliverable or disposable.'
-        };
+        return { valid: false, reason: 'Google Verification Failed: Account is undeliverable or disposable.' };
       }
     }
-  } catch {
-    // Continue
-  }
+  } catch {}
 
-  return {
-    valid: true,
-    email,
-    reason: 'Verified: Active Google Gmail Account Confirmed'
-  };
+  return { valid: true, email, reason: 'Verified: Active Google Gmail Account Confirmed' };
 }
 
 export default function App() {
-  // --- AUTH & USER STATES ---
   const [userRole, setUserRole] = useState(() => localStorage.getItem('nexus_user_role') || 'guest');
   const [currentUserEmail, setCurrentUserEmail] = useState(() => localStorage.getItem('nexus_user_email') || '');
   const [registeredUsers, setRegisteredUsers] = useState(() => {
@@ -216,7 +164,6 @@ export default function App() {
     }
   });
 
-  // --- PER-USER MUMU POINTS MAP (Uses Firebase-safe keys: user_at_gmail_dot_com) ---
   const [userPointsMap, setUserPointsMap] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_user_points_map');
@@ -226,6 +173,18 @@ export default function App() {
     }
   });
 
+  const [feedbackList, setFeedbackList] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_feedback_list');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [feedbackCategory, setFeedbackCategory] = useState('General');
+  const [newFeedbackText, setNewFeedbackText] = useState('');
+
   const activeEmail = userRole === 'admin'
     ? 'admin@nexus.com'
     : userRole === 'user' && currentUserEmail
@@ -234,21 +193,14 @@ export default function App() {
 
   const activeSafeKey = activeEmail ? emailToFirebaseKey(activeEmail) : null;
 
-  // Resolves exact MuMu points for the logged-in email ID
   const getPointsForEmail = (emailStr) => {
     if (!emailStr) return 0;
     const clean = emailStr.trim().toLowerCase();
     const safeKey = emailToFirebaseKey(clean);
-    if (typeof userPointsMap[safeKey] === 'number') {
-      return userPointsMap[safeKey];
-    }
-    if (typeof userPointsMap[clean] === 'number') {
-      return userPointsMap[clean];
-    }
+    if (typeof userPointsMap[safeKey] === 'number') return userPointsMap[safeKey];
+    if (typeof userPointsMap[clean] === 'number') return userPointsMap[clean];
     const foundUser = registeredUsers.find((u) => u.email.toLowerCase() === clean);
-    if (foundUser && typeof foundUser.points === 'number') {
-      return foundUser.points;
-    }
+    if (foundUser && typeof foundUser.points === 'number') return foundUser.points;
     return 0;
   };
 
@@ -261,11 +213,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-
-  // --- WHATSAPP-STYLE "READ MORE" EXPANDED STATE FOR SNIPPETS ---
   const [expandedSnippets, setExpandedSnippets] = useState({});
 
-  // --- SYNCED DATA STATES ---
   const [snippets, setSnippets] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_snippets');
@@ -274,6 +223,7 @@ export default function App() {
       return DEFAULT_SNIPPETS;
     }
   });
+
   const [studyTasks, setStudyTasks] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_study_tasks');
@@ -282,6 +232,7 @@ export default function App() {
       return DEFAULT_TASKS;
     }
   });
+
   const [bagItems, setBagItems] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_bag_items');
@@ -291,13 +242,13 @@ export default function App() {
     }
   });
 
-  const stateRef = useRef({ snippets, studyTasks, bagItems, userPointsMap, registeredUsers });
+  const stateRef = useRef({ snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList });
   const lastLocalWriteRef = useRef(0);
-  useEffect(() => {
-    stateRef.current = { snippets, studyTasks, bagItems, userPointsMap, registeredUsers };
-  }, [snippets, studyTasks, bagItems, userPointsMap, registeredUsers]);
 
-  // --- LOGIN & REGISTER FORM STATES ---
+  useEffect(() => {
+    stateRef.current = { snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList };
+  }, [snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList]);
+
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -308,7 +259,6 @@ export default function App() {
   const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
   const [emailVerifiedStatus, setEmailVerifiedStatus] = useState(null);
 
-  // --- SNIPPET MODAL STATES ---
   const [searchQuery, setSearchQuery] = useState('');
   const [showSnippetModal, setShowSnippetModal] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState(null);
@@ -317,24 +267,21 @@ export default function App() {
   const [snippetCode, setSnippetCode] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
-  // --- AURA AI STATES ---
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hey! 👋 I'm Aura, your AI coding and study mentor.This is new Project and It does more mistakes" 
+      text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. How can I help you today?" 
     }
   ]);
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // --- STUDY & BAG INPUTS ---
   const [newTaskText, setNewTaskText] = useState('');
   const [newBagItem, setNewBagItem] = useState('');
 
-  // --- ARCADE GAMES STATES ---
   const [activeGame, setActiveGame] = useState(null);
   const [codeleTarget, setCodeleTarget] = useState('REACT');
   const [codeleGuesses, setCodeleGuesses] = useState([]);
@@ -352,9 +299,6 @@ export default function App() {
   const [stroopMode, setStroopMode] = useState('COLOR');
   const [stroopStreak, setStroopStreak] = useState(0);
 
-  // ============================================================================
-  // ☁️ REALTIME CLOUD SYNC ENGINE (With Safe Keys for Per-User Email Points)
-  // ============================================================================
   const sanitizePointsMapForFirebase = (rawMap) => {
     const cleanMap = {};
     if (!rawMap || typeof rawMap !== 'object') return cleanMap;
@@ -382,6 +326,7 @@ export default function App() {
       bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
       userPointsMap: safePoints,
       registeredUsers: overrideData.registeredUsers ?? stateRef.current.registeredUsers,
+      feedbackList: overrideData.feedbackList ?? stateRef.current.feedbackList,
       updatedAt: Date.now()
     };
 
@@ -392,7 +337,7 @@ export default function App() {
         body: JSON.stringify(payload)
       });
       setCloudConnected(res.ok);
-    } catch (err) {
+    } catch {
       setCloudConnected(false);
     } finally {
       setIsSyncing(false);
@@ -434,12 +379,16 @@ export default function App() {
           setRegisteredUsers(data.registeredUsers);
           localStorage.setItem('nexus_registered_users', JSON.stringify(data.registeredUsers));
         }
-        if (manual) showToast('☁️ Synced latest data & user points from cloud!');
+        if (Array.isArray(data.feedbackList)) {
+          setFeedbackList(data.feedbackList);
+          localStorage.setItem('nexus_feedback_list', JSON.stringify(data.feedbackList));
+        }
+        if (manual) showToast('☁️ Synced latest data from cloud!');
         return data;
       } else {
         await pushToCloud();
       }
-    } catch (e) {
+    } catch {
       setCloudConnected(false);
     } finally {
       if (manual) setIsSyncing(false);
@@ -454,11 +403,11 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // --- LOCAL STORAGE PERSISTENCE ---
   useEffect(() => localStorage.setItem('nexus_user_role', userRole), [userRole]);
   useEffect(() => localStorage.setItem('nexus_user_email', currentUserEmail), [currentUserEmail]);
   useEffect(() => localStorage.setItem('nexus_registered_users', JSON.stringify(registeredUsers)), [registeredUsers]);
   useEffect(() => localStorage.setItem('nexus_user_points_map', JSON.stringify(userPointsMap)), [userPointsMap]);
+  useEffect(() => localStorage.setItem('nexus_feedback_list', JSON.stringify(feedbackList)), [feedbackList]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
   useEffect(() => localStorage.setItem('nexus_study_tasks', JSON.stringify(studyTasks)), [studyTasks]);
@@ -473,7 +422,6 @@ export default function App() {
     setTimeout(() => setToast(null), 2800);
   };
 
-  // --- AWARD MUMU POINTS SPECIFICALLY TO LOGGED-IN EMAIL ID ---
   const awardPoints = (amount, label = 'Bonus') => {
     if (!activeEmail || !activeSafeKey) {
       showToast('🔒 Please Login or Register to save MuMu points to your ID!');
@@ -499,7 +447,6 @@ export default function App() {
     showToast(`+${amount} MuMu Points synced to ${activeEmail}! (${label})`);
   };
 
-  // --- AUTH & NAVIGATION HANDLERS ---
   const openAuthModal = (mode = 'login') => {
     setAuthMode(mode);
     setLoginError('');
@@ -528,7 +475,6 @@ export default function App() {
       : registeredUsers;
     const activeCloudPointsMap = latestCloud?.userPointsMap || userPointsMap;
 
-    // Hidden Admin Check
     if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
       setUserRole('admin');
       setCurrentUserEmail('admin@nexus.com');
@@ -659,9 +605,6 @@ export default function App() {
     showToast('🔒 Logged out.');
   };
 
-  // ============================================================================
-  // 🔒 SNIPPET HANDLERS (STRICTLY ADMIN ONLY + WHATSAPP "READ MORE" + FULL COPY)
-  // ============================================================================
   const openAddSnippetModal = () => {
     if (userRole !== 'admin') return;
     setEditingSnippet(null);
@@ -716,7 +659,6 @@ export default function App() {
     showToast('🗑️ Snippet deleted by Admin.');
   };
 
-  // Always copies 100% of the full code, even when collapsed in "Read more..."
   const handleCopyCode = (id, fullCodeText) => {
     navigator.clipboard.writeText(fullCodeText);
     setCopiedId(id);
@@ -731,9 +673,6 @@ export default function App() {
     }));
   };
 
-  // ============================================================================
-  // 🤖 BUILT-IN MULTI-CHANNEL LIVE AI ENGINE (Works Out-of-the-Box)
-  // ============================================================================
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -753,23 +692,19 @@ export default function App() {
     const currentImage = selectedImage;
     const updatedHistory = [
       ...chatHistory, 
-      { sender: 'user', text: userMessage || 'Analyze this attached image in detail.', image: currentImage }
+      { sender: 'user', text: userMessage || 'Analyze this attached image.', image: currentImage }
     ];
     setChatHistory(updatedHistory);
     setChatInput('');
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const expertSystemPrompt = `You are Aura, an elite, highly accurate AI software engineer, computer science tutor, and friendly mentor inside Nexus Studio, built for Prince Rodrigues.
-Rules:
-1. Give 100% accurate, complete, well-structured answers.
-2. When asked to write code, provide clean, working code inside markdown code blocks (\`\`\`language ... \`\`\`) with a brief explanation.
-3. Respond warmly and naturally to greetings.`;
+    const systemPrompt = `You are Aura, a helpful AI coding assistant and study companion inside Nexus Studio.
+Provide clear answers and put code examples inside markdown code blocks (\`\`\`language ... \`\`\`).`;
 
-    // 1. Official Google Gemini API (Compatible with all v1beta models)
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
       const geminiContents = updatedHistory.slice(-8).map((msg, idx) => {
-        const textPrefix = idx === 0 && msg.sender === 'user' ? `${expertSystemPrompt}\n\nUser: ` : '';
+        const textPrefix = idx === 0 && msg.sender === 'user' ? `${systemPrompt}\n\nUser: ` : '';
         const parts = [{ text: `${textPrefix}${msg.text}` }];
         if (msg.image) {
           const matches = msg.image.match(/^data:(.+);base64,(.+)$/);
@@ -793,7 +728,7 @@ Rules:
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: geminiContents,
-                generationConfig: { temperature: 0.35, maxOutputTokens: 4096 }
+                generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
               })
             }
           );
@@ -806,24 +741,21 @@ Rules:
               return;
             }
           }
-        } catch (err) {
-          // Try next model
-        }
+        } catch {}
       }
     }
 
-    // 2. Built-in Multi-Model OpenAI-Compatible Endpoint (Tries 'openai', 'openai-large', 'mistral')
     const fallbackModels = ['openai', 'openai-large', 'mistral'];
     for (const fbModel of fallbackModels) {
       try {
         const openAiMessages = [
-          { role: 'system', content: expertSystemPrompt },
+          { role: 'system', content: systemPrompt },
           ...updatedHistory.slice(-6).map((msg) => {
             if (msg.image) {
               return {
                 role: msg.sender === 'user' ? 'user' : 'assistant',
                 content: [
-                  { type: 'text', text: msg.text || 'Analyze this image in detail.' },
+                  { type: 'text', text: msg.text || 'Analyze this image.' },
                   { type: 'image_url', image_url: { url: msg.image } }
                 ]
               };
@@ -840,7 +772,7 @@ Rules:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: fbModel,
-            temperature: 0.35,
+            temperature: 0.4,
             messages: openAiMessages
           })
         });
@@ -854,15 +786,12 @@ Rules:
             return;
           }
         }
-      } catch (err) {
-        // Proceed to next model
-      }
+      } catch {}
     }
 
-    // 3. Direct GET Stream Endpoint (Zero CORS / Payload Failures)
     try {
       const promptQuery = encodeURIComponent(
-        `You are Aura, an expert coding and study AI assistant for Prince. Answer accurately and provide clean code if requested: ${userMessage}`
+        `You are Aura, a helpful AI coding assistant. Answer clearly: ${userMessage}`
       );
       const getRes = await fetch(`https://text.pollinations.ai/${promptQuery}`);
       if (getRes.ok) {
@@ -873,21 +802,18 @@ Rules:
           return;
         }
       }
-    } catch (err) {
-      console.error('AI connection error:', err);
-    }
+    } catch {}
 
     setChatHistory([
       ...updatedHistory,
       {
         sender: 'aura',
-        text: '⚠️ Network connection was interrupted. Please check your internet connection and try sending your message again.'
+        text: '⚠️ Network connection was interrupted. Please check your internet connection and try again.'
       }
     ]);
     setIsAiLoading(false);
   };
 
-  // Renders formatted code blocks with Copy buttons inside AI chat bubbles
   const renderFormattedAiText = (rawText, msgIndex) => {
     if (!rawText) return null;
     const segments = rawText.split(/(```[\s\S]*?```)/g);
@@ -938,9 +864,6 @@ Rules:
     });
   };
 
-  // ============================================================================
-  // 🎮 4 GEN-Z LOGIC & BRAIN GAMES
-  // ============================================================================
   const initCodele = () => {
     const randomWord = CODELE_WORDS[Math.floor(Math.random() * CODELE_WORDS.length)];
     setCodeleTarget(randomWord);
@@ -1118,7 +1041,6 @@ Rules:
     }
   };
 
-  // --- STUDY PLANNER & BAG PACKER HANDLERS ---
   const handleAddTask = (e) => {
     e.preventDefault();
     if (!newTaskText.trim()) return;
@@ -1163,15 +1085,44 @@ Rules:
     pushToCloud({ bagItems: updated });
   };
 
+  const handleSubmitFeedback = async (e) => {
+    e.preventDefault();
+    if (!newFeedbackText.trim()) return;
+
+    const latestCloud = await fetchFromCloud(false);
+    const currentFeedbacks = Array.isArray(latestCloud?.feedbackList)
+      ? latestCloud.feedbackList
+      : feedbackList;
+
+    const newEntry = {
+      id: Date.now(),
+      userEmail: activeEmail || 'Guest User',
+      category: feedbackCategory,
+      message: newFeedbackText.trim(),
+      createdAt: new Date().toLocaleString()
+    };
+
+    const updatedFeedback = [newEntry, ...currentFeedbacks];
+    setFeedbackList(updatedFeedback);
+    await pushToCloud({ feedbackList: updatedFeedback });
+    setNewFeedbackText('');
+    showToast('✅ Feedback submitted to Admin!');
+  };
+
+  const handleDeleteFeedback = async (id) => {
+    if (userRole !== 'admin') return;
+    const updated = feedbackList.filter((item) => item.id !== id);
+    setFeedbackList(updated);
+    await pushToCloud({ feedbackList: updated });
+    showToast('🗑️ Feedback entry removed.');
+  };
+
   const filteredSnippets = snippets.filter(s => 
     s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (s.category && s.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  // ============================================================================
-  // 🖥️ MAIN VIEW RENDERER
-  // ============================================================================
   const renderContent = () => {
     switch (activeTab) {
       case 'snippetHub':
@@ -1255,7 +1206,6 @@ Rules:
                         {snippet.category || 'CODE'}
                       </span>
                       <div className="flex items-center gap-1">
-                        {/* ALWAYS COPIES 100% FULL SNIPPET.CODE EVEN WHEN COLLAPSED */}
                         <button 
                           onClick={() => handleCopyCode(snippet.id, snippet.code)}
                           className="px-2 py-1 text-gray-300 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all flex items-center gap-1 text-xs"
@@ -1528,11 +1478,11 @@ Rules:
                   <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Companion
                 </h1>
                 <p className="text-xs text-gray-400">
-                  High-Accuracy Generative AI & Multimodal Code Mentor
+                  AI Assistant — AI can make mistakes, so please verify important outputs.
                 </p>
               </div>
               <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
-                ● Live AI Online
+                ● Online
               </span>
             </div>
             
@@ -1558,7 +1508,7 @@ Rules:
                     <Sparkles className="w-4 h-4 text-white animate-spin" />
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is generating response...
+                    Aura is thinking...
                   </div>
                 </div>
               )}
@@ -1590,13 +1540,16 @@ Rules:
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask Aura any coding, math, or science question..." 
+                  placeholder="Ask Aura a question..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
                 <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg shrink-0">
                   <Send className="w-5 h-5 text-white" />
                 </button>
               </form>
+              <p className="text-[11px] text-gray-500 text-center mt-2">
+                Aura is an AI and can make mistakes. Please double-check important information and code.
+              </p>
             </div>
           </div>
         );
@@ -1604,8 +1557,8 @@ Rules:
       case 'studyPlanner':
         return (
           <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <h1 className="text-2xl md:text-3xl font-bold mb-2">AI Study Planner</h1>
-            <p className="text-gray-400 text-sm mb-6">Track your learning milestones (Syncs across devices).</p>
+            <h1 className="text-2xl md:text-3xl font-bold mb-2">Study Planner</h1>
+            <p className="text-gray-400 text-sm mb-6">Track your learning milestones across devices.</p>
             <form onSubmit={handleAddTask} className="flex gap-2 mb-6">
               <input
                 type="text"
@@ -1638,7 +1591,7 @@ Rules:
         return (
           <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
             <h1 className="text-2xl md:text-3xl font-bold mb-2">Routine & Bag Packer</h1>
-            <p className="text-gray-400 text-sm mb-6">Never forget your college or hackathon essentials.</p>
+            <p className="text-gray-400 text-sm mb-6">Keep track of your daily essentials.</p>
             <form onSubmit={handleAddBagItem} className="flex gap-2 mb-6">
               <input
                 type="text"
@@ -1664,6 +1617,117 @@ Rules:
                 </div>
               ))}
             </div>
+          </div>
+        );
+
+      case 'feedback':
+        return (
+          <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">
+                  {userRole === 'admin' ? 'Admin Feedback Inbox' : 'User Feedback'}
+                </h1>
+                <p className="text-gray-400 text-sm mt-1">
+                  {userRole === 'admin'
+                    ? 'All feedback submitted by users is displayed below.'
+                    : 'Share your thoughts, report bugs, or request features for the Admin.'}
+                </p>
+              </div>
+              {userRole === 'admin' && (
+                <button
+                  onClick={() => fetchFromCloud(true)}
+                  className="bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-cyan-400"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} /> Refresh Inbox
+                </button>
+              )}
+            </div>
+
+            {userRole === 'admin' ? (
+              <div className="space-y-4">
+                {feedbackList.length === 0 ? (
+                  <div className="bg-[#12121a] p-8 rounded-2xl border border-white/10 text-center text-gray-400 text-sm">
+                    No user feedback has been submitted yet.
+                  </div>
+                ) : (
+                  feedbackList.map((item) => (
+                    <div key={item.id} className="bg-[#12121a] p-5 rounded-xl border border-white/10 flex flex-col gap-2">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/20">
+                            {item.category || 'Feedback'}
+                          </span>
+                          <span className="text-xs font-bold text-indigo-400">
+                            {item.userEmail}
+                          </span>
+                          <span className="text-[11px] text-gray-500">
+                            • {item.createdAt}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteFeedback(item.id)}
+                          className="text-gray-500 hover:text-red-400 p-1"
+                          title="Delete Feedback"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <p className="text-sm text-gray-200 whitespace-pre-wrap mt-1 bg-[#050505] p-3.5 rounded-lg border border-white/5">
+                        {item.message}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitFeedback} className="bg-[#12121a] p-6 rounded-2xl border border-white/10 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                    Your Account ID
+                  </label>
+                  <input
+                    type="text"
+                    value={activeEmail || 'Guest'}
+                    disabled
+                    className="w-full bg-[#050505] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                    Category
+                  </label>
+                  <select
+                    value={feedbackCategory}
+                    onChange={(e) => setFeedbackCategory(e.target.value)}
+                    className="w-full bg-[#050505] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="General">General Feedback</option>
+                    <option value="Bug Report">Bug Report</option>
+                    <option value="Feature Request">Feature Request</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                    Your Feedback
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={newFeedbackText}
+                    onChange={(e) => setNewFeedbackText(e.target.value)}
+                    placeholder="Write your feedback here..."
+                    className="w-full bg-[#050505] border border-white/10 rounded-lg p-3.5 text-sm text-white focus:outline-none focus:border-cyan-500"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 rounded-lg text-sm font-bold transition-all flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4" /> Submit Feedback
+                </button>
+              </form>
+            )}
           </div>
         );
 
@@ -1693,7 +1757,6 @@ Rules:
         </div>
       )}
 
-      {/* 1. MOBILE TOP HEADER */}
       <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-[#0a0a0f] border-b border-white/10 flex items-center justify-between px-4 z-50">
         <div className="font-bold text-lg text-indigo-400 flex items-center gap-2">
           <Shield className="w-5 h-5" /> Nexus Studio
@@ -1712,7 +1775,6 @@ Rules:
         <div className="md:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
       )}
 
-      {/* 2. RESPONSIVE SIDEBAR */}
       <div className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-[#0a0a0f] border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="hidden md:flex p-6 items-center gap-3 border-b border-white/10">
           <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-600/20">
@@ -1739,12 +1801,21 @@ Rules:
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
           <button onClick={() => handleNavigation('studyPlanner')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'studyPlanner' ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
-            <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> AI Study Planner</div>
+            <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> Study Planner</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
           <button onClick={() => handleNavigation('bagPacker')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'bagPacker' ? 'bg-orange-600/10 text-orange-400 border border-orange-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><Briefcase className="w-5 h-5" /> Routine & Packer</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
+          </button>
+          <button onClick={() => handleNavigation('feedback')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'feedback' ? 'bg-cyan-600/10 text-cyan-400 border border-cyan-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+            <div className="flex items-center gap-3"><MessageSquare className="w-5 h-5" /> Feedback</div>
+            {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
+            {userRole === 'admin' && feedbackList.length > 0 && (
+              <span className="bg-cyan-500 text-black text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                {feedbackList.length}
+              </span>
+            )}
           </button>
         </nav>
 
@@ -1800,12 +1871,10 @@ Rules:
         </div>
       </div>
 
-      {/* 3. MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col pt-16 md:pt-0 overflow-y-auto overflow-x-hidden relative bg-[#050505]">
         {renderContent()}
       </div>
 
-      {/* --- ADD / EDIT SNIPPET MODAL (ADMIN ONLY) --- */}
       {showSnippetModal && userRole === 'admin' && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative animate-pop-in">
@@ -1866,7 +1935,6 @@ Rules:
         </div>
       )}
 
-      {/* --- LOGIN & NEW USER REGISTRATION MODAL --- */}
       {showLogin && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full shadow-2xl relative animate-pop-in">
@@ -1887,7 +1955,7 @@ Rules:
               </h2>
               <p className="text-gray-400 text-xs mt-1">
                 {authMode === 'login'
-                  ? 'Sign in to load the exact MuMu Points synced to your Mail ID'
+                  ? 'Sign in to load the MuMu Points synced to your Mail ID'
                   : 'Register with a real Google Gmail ID (Starts with 0 MuMu Points)'}
               </p>
             </div>
