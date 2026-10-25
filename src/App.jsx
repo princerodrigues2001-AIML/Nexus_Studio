@@ -5,7 +5,7 @@ import {
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
-  UserPlus, CheckCircle2, AlertCircle, Loader2
+  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // ============================================================================
@@ -32,10 +32,21 @@ function resolveFirebaseDatabaseUrl(rawUrl) {
 
 const CLEAN_FIREBASE_URL = resolveFirebaseDatabaseUrl(RAW_FIREBASE_URL);
 
+// Converts an email into a Firebase-safe key (Firebase forbids '.', '#', '$', '[', ']' in keys)
+function emailToFirebaseKey(email) {
+  if (!email) return '';
+  return email.trim().toLowerCase().replace(/\./g, '_dot_').replace(/@/g, '_at_').replace(/[^a-z0-9_]/g, '_');
+}
+
 const DEFAULT_SNIPPETS = [
   { id: 1, title: 'Center a Div', category: 'CSS', code: 'display: flex;\njustify-content: center;\nalign-items: center;' },
   { id: 2, title: 'Fetch API Wrapper', category: 'JS', code: 'const fetcher = url => fetch(url).then(r => r.json());' },
-  { id: 3, title: 'React State Hook', category: 'REACT', code: 'const [val, setVal] = useState(initial);' }
+  { 
+    id: 3, 
+    title: 'Full Async API Handler with Retry', 
+    category: 'JS', 
+    code: 'async function fetchWithRetry(url, retries = 3) {\n  for (let i = 0; i < retries; i++) {\n    try {\n      const response = await fetch(url);\n      if (!response.ok) throw new Error("HTTP Error");\n      return await response.json();\n    } catch (err) {\n      if (i === retries - 1) throw err;\n      await new Promise(r => setTimeout(r, 1000));\n    }\n  }\n}' 
+  }
 ];
 
 const DEFAULT_TASKS = [
@@ -62,13 +73,11 @@ const STROOP_COLORS = [
 ];
 
 // ============================================================================
-// 🔍 3-LAYER GOOGLE ACCOUNT EXISTENCE & AUTHENTICITY VERIFIER
-// Rejects non-existent, keyboard-mashed, fake, or synthetic @gmail.com IDs
+// 🔍 GOOGLE ACCOUNT EXISTENCE & AUTHENTICITY VERIFIER
 // ============================================================================
 async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   const email = rawEmail.trim().toLowerCase();
 
-  // 1. Must strictly be a @gmail.com address with a non-empty local username
   const parts = email.split('@');
   if (parts.length !== 2 || parts[1] !== 'gmail.com' || !parts[0]) {
     return {
@@ -79,7 +88,6 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
 
   const username = parts[0];
 
-  // 2. Official Google Gmail length & character rules (6 to 30 chars)
   if (username.length < 6 || username.length > 30) {
     return {
       valid: false,
@@ -102,8 +110,6 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   }
 
   const cleanUser = username.replace(/\./g, '');
-
-  // Must start with a letter and contain at least 4 alphabetic letters
   const lettersOnly = cleanUser.replace(/[^a-z]/g, '');
   const digitsOnly = cleanUser.replace(/[^0-9]/g, '');
 
@@ -114,7 +120,6 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     };
   }
 
-  // Reject if numbers outnumber letters (e.g. a1234567@gmail.com)
   if (digitsOnly.length > lettersOnly.length || digitsOnly.length > 6) {
     return {
       valid: false,
@@ -122,7 +127,6 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     };
   }
 
-  // 3. Block fake/test words, keyboard walks, and repeating sequences
   const forbiddenSubstrings = [
     'test', 'fake', 'demo', 'sample', 'temp', 'dummy', 'guest', 'admin',
     'user', 'random', 'invalid', 'notexist', 'nonexist', 'noaccount',
@@ -142,23 +146,13 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     };
   }
 
-  // Block 3+ identical repeating characters (e.g. aaaccc@gmail.com)
-  if (/(.)\1{2,}/.test(cleanUser)) {
+  if (/(.)\1{2,}/.test(cleanUser) || /[a-z]\d[a-z]\d/.test(cleanUser)) {
     return {
       valid: false,
       reason: 'Google Verification Failed: Account does not exist on Google.'
     };
   }
 
-  // Block alternating letter-number patterns (e.g. a1b2c3@gmail.com)
-  if (/[a-z]\d[a-z]\d/.test(cleanUser)) {
-    return {
-      valid: false,
-      reason: 'Google Verification Failed: Account does not exist on Google.'
-    };
-  }
-
-  // 4. Phonetic Vowel-Consonant Human Name Check (Blocks random consonant mashing like kjsdhf@gmail.com)
   const vowels = (lettersOnly.match(/[aeiouy]/g) || []).length;
   const vowelRatio = vowels / lettersOnly.length;
 
@@ -169,15 +163,17 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     };
   }
 
-  // Block 5+ consecutive consonants or unpronounceable 4-consonant mashing
-  if (/[bcdfghjklmnpqrstvwxz]{5,}/.test(lettersOnly) || /[jqwxz]{2,}/.test(lettersOnly) || /[bcdfghjklmnpqrstvwxz]{4}$/.test(lettersOnly)) {
+  if (
+    /[bcdfghjklmnpqrstvwxz]{5,}/.test(lettersOnly) || 
+    /[jqwxz]{2,}/.test(lettersOnly) || 
+    /[bcdfghjklmnpqrstvwxz]{4}$/.test(lettersOnly)
+  ) {
     return {
       valid: false,
       reason: 'Google Verification Failed: Account does not exist on Google.'
     };
   }
 
-  // If already registered in Nexus Studio, it is a known valid account
   if (existingUsers.some((u) => u.email.toLowerCase() === email)) {
     return {
       valid: true,
@@ -186,7 +182,6 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
     };
   }
 
-  // 5. Live Disify & Google DNS Verification
   try {
     const disifyRes = await fetch(`https://disify.com/api/email/${encodeURIComponent(email)}`);
     if (disifyRes.ok) {
@@ -199,59 +194,7 @@ async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
       }
     }
   } catch {
-    // Proceed to AI verification layer
-  }
-
-  // 6. Live AI Account Authenticity Check (Detects made-up / gibberish / non-existent handles)
-  const verifyPrompt = `You are a strict Google Account email validator. Analyze this Gmail username: "${username}" (from "${email}").
-Determine if "${username}" is a realistic, genuine human name/surname/username (such as "princerodrigues2001", "rahul.sharma", "ananya.verma19", "karthikgowda"), OR if it looks like a random string, gibberish, keyboard mash, made-up test word, or non-existent fake handle (such as "kjsdhfkj", "randomguy", "myaccount", "hellothere", "testingid", "xyzkumar", "qweasdzxc", "notreal").
-Be strict: if it looks fake, generic, or randomly typed, reject it.
-Reply with ONLY the word "VALID" if it is a realistic human name handle, or "INVALID" if it looks fake/random.`;
-
-  try {
-    let aiVerdict = '';
-    if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
-      const gemRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: verifyPrompt }] }],
-            generationConfig: { temperature: 0.0, maxOutputTokens: 20 }
-          })
-        }
-      );
-      if (gemRes.ok) {
-        const gemData = await gemRes.json();
-        aiVerdict = (gemData?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
-      }
-    }
-
-    if (!aiVerdict) {
-      const pollRes = await fetch('https://text.pollinations.ai/openai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'openai',
-          temperature: 0,
-          messages: [{ role: 'user', content: verifyPrompt }]
-        })
-      });
-      if (pollRes.ok) {
-        const pollData = await pollRes.json();
-        aiVerdict = (pollData?.choices?.[0]?.message?.content || '').trim().toUpperCase();
-      }
-    }
-
-    if (aiVerdict.includes('INVALID')) {
-      return {
-        valid: false,
-        reason: 'Google Account Verification Failed: This Gmail account does not exist on Google.'
-      };
-    }
-  } catch {
-    // Fallback if offline
+    // Continue
   }
 
   return {
@@ -274,7 +217,7 @@ export default function App() {
     }
   });
 
-  // --- PER-USER MUMU POINTS MAP ({ [email]: points }) ---
+  // --- PER-USER MUMU POINTS MAP (Uses Firebase-safe keys: user_at_gmail_dot_com) ---
   const [userPointsMap, setUserPointsMap] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_user_points_map');
@@ -284,15 +227,33 @@ export default function App() {
     }
   });
 
-  // Active logged-in account key for per-ID MuMu points
-  const activeAccountKey = userRole === 'admin'
+  const activeEmail = userRole === 'admin'
     ? 'admin@nexus.com'
     : userRole === 'user' && currentUserEmail
       ? currentUserEmail.trim().toLowerCase()
       : null;
 
-  // Displays ONLY the exact MuMu points earned by the currently logged-in ID (0 for guest or new ID)
-  const mumuPoints = activeAccountKey ? (userPointsMap[activeAccountKey] || 0) : 0;
+  const activeSafeKey = activeEmail ? emailToFirebaseKey(activeEmail) : null;
+
+  // Resolves exact MuMu points for the logged-in email ID
+  const getPointsForEmail = (emailStr) => {
+    if (!emailStr) return 0;
+    const clean = emailStr.trim().toLowerCase();
+    const safeKey = emailToFirebaseKey(clean);
+    if (typeof userPointsMap[safeKey] === 'number') {
+      return userPointsMap[safeKey];
+    }
+    if (typeof userPointsMap[clean] === 'number') {
+      return userPointsMap[clean];
+    }
+    const foundUser = registeredUsers.find((u) => u.email.toLowerCase() === clean);
+    if (foundUser && typeof foundUser.points === 'number') {
+      return foundUser.points;
+    }
+    return 0;
+  };
+
+  const mumuPoints = activeEmail ? getPointsForEmail(activeEmail) : 0;
 
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -301,6 +262,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // --- WHATSAPP-STYLE "READ MORE" EXPANDED STATE FOR SNIPPETS ---
+  const [expandedSnippets, setExpandedSnippets] = useState({});
 
   // --- SYNCED DATA STATES ---
   const [snippets, setSnippets] = useState(() => {
@@ -390,18 +354,34 @@ export default function App() {
   const [stroopStreak, setStroopStreak] = useState(0);
 
   // ============================================================================
-  // ☁️ REALTIME CLOUD SYNC ENGINE (Laptop <-> Mobile Sync)
+  // ☁️ REALTIME CLOUD SYNC ENGINE (With Safe Keys for Per-User Email Points)
   // ============================================================================
+  const sanitizePointsMapForFirebase = (rawMap) => {
+    const cleanMap = {};
+    if (!rawMap || typeof rawMap !== 'object') return cleanMap;
+    Object.entries(rawMap).forEach(([k, val]) => {
+      const safeK = k.includes('@') || k.includes('.') ? emailToFirebaseKey(k) : k;
+      if (safeK && typeof val === 'number') {
+        cleanMap[safeK] = val;
+      }
+    });
+    return cleanMap;
+  };
+
   const pushToCloud = async (overrideData = {}) => {
     if (!CLEAN_FIREBASE_URL) return;
     lastLocalWriteRef.current = Date.now();
     setIsSyncing(true);
 
+    const safePoints = sanitizePointsMapForFirebase(
+      overrideData.userPointsMap ?? stateRef.current.userPointsMap
+    );
+
     const payload = {
       snippets: overrideData.snippets ?? stateRef.current.snippets,
       studyTasks: overrideData.studyTasks ?? stateRef.current.studyTasks,
       bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
-      userPointsMap: overrideData.userPointsMap ?? stateRef.current.userPointsMap,
+      userPointsMap: safePoints,
       registeredUsers: overrideData.registeredUsers ?? stateRef.current.registeredUsers,
       updatedAt: Date.now()
     };
@@ -421,15 +401,15 @@ export default function App() {
   };
 
   const fetchFromCloud = async (manual = false) => {
-    if (!CLEAN_FIREBASE_URL) return;
-    if (!manual && Date.now() - lastLocalWriteRef.current < 2000) return;
+    if (!CLEAN_FIREBASE_URL) return null;
+    if (!manual && Date.now() - lastLocalWriteRef.current < 2000) return null;
 
     try {
       if (manual) setIsSyncing(true);
       const res = await fetch(`${CLEAN_FIREBASE_URL}/nexus_studio_state.json`);
       if (!res.ok) {
         setCloudConnected(false);
-        return;
+        return null;
       }
       const data = await res.json();
       setCloudConnected(true);
@@ -455,7 +435,8 @@ export default function App() {
           setRegisteredUsers(data.registeredUsers);
           localStorage.setItem('nexus_registered_users', JSON.stringify(data.registeredUsers));
         }
-        if (manual) showToast('☁️ Synced latest data from cloud!');
+        if (manual) showToast('☁️ Synced latest data & user points from cloud!');
+        return data;
       } else {
         await pushToCloud();
       }
@@ -464,6 +445,7 @@ export default function App() {
     } finally {
       if (manual) setIsSyncing(false);
     }
+    return null;
   };
 
   useEffect(() => {
@@ -492,30 +474,30 @@ export default function App() {
     setTimeout(() => setToast(null), 2800);
   };
 
-  // --- AWARD MUMU POINTS SPECIFICALLY TO LOGGED-IN USER ID ---
+  // --- AWARD MUMU POINTS SPECIFICALLY TO LOGGED-IN EMAIL ID ---
   const awardPoints = (amount, label = 'Bonus') => {
-    if (!activeAccountKey) {
+    if (!activeEmail || !activeSafeKey) {
       showToast('🔒 Please Login or Register to save MuMu points to your ID!');
       openAuthModal('login');
       return;
     }
 
-    const currentPts = userPointsMap[activeAccountKey] || 0;
+    const currentPts = getPointsForEmail(activeEmail);
     const nextPts = currentPts + amount;
+
     const updatedMap = {
-      ...userPointsMap,
-      [activeAccountKey]: nextPts
+      ...sanitizePointsMapForFirebase(userPointsMap),
+      [activeSafeKey]: nextPts
     };
 
-    // Also update points inside registeredUsers list for this user ID
     const updatedUsers = registeredUsers.map((u) =>
-      u.email.toLowerCase() === activeAccountKey ? { ...u, points: nextPts } : u
+      u.email.toLowerCase() === activeEmail ? { ...u, points: nextPts } : u
     );
 
     setUserPointsMap(updatedMap);
     setRegisteredUsers(updatedUsers);
     pushToCloud({ userPointsMap: updatedMap, registeredUsers: updatedUsers });
-    showToast(`+${amount} MuMu Points saved to ${activeAccountKey}! (${label})`);
+    showToast(`+${amount} MuMu Points synced to ${activeEmail}! (${label})`);
   };
 
   // --- AUTH & NAVIGATION HANDLERS ---
@@ -537,9 +519,15 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     const emailInput = loginEmail.trim().toLowerCase();
+
+    const latestCloud = await fetchFromCloud(true);
+    const activeUsersList = Array.isArray(latestCloud?.registeredUsers)
+      ? latestCloud.registeredUsers
+      : registeredUsers;
+    const activeCloudPointsMap = latestCloud?.userPointsMap || userPointsMap;
 
     // Hidden Admin Check
     if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
@@ -553,24 +541,33 @@ export default function App() {
       return;
     }
 
-    const matchedUser = registeredUsers.find(
+    const matchedUser = activeUsersList.find(
       (u) => u.email.toLowerCase() === emailInput && u.password === loginPassword
     );
 
     if (matchedUser) {
       const cleanId = matchedUser.email.toLowerCase();
-      // Sync points from user record if map doesn't have it yet
-      if (typeof matchedUser.points === 'number' && userPointsMap[cleanId] === undefined) {
-        const syncedMap = { ...userPointsMap, [cleanId]: matchedUser.points };
-        setUserPointsMap(syncedMap);
-      }
+      const safeKey = emailToFirebaseKey(cleanId);
+      const userPts =
+        typeof activeCloudPointsMap[safeKey] === 'number'
+          ? activeCloudPointsMap[safeKey]
+          : typeof matchedUser.points === 'number'
+            ? matchedUser.points
+            : 0;
+
+      const syncedMap = {
+        ...sanitizePointsMapForFirebase(activeCloudPointsMap),
+        [safeKey]: userPts
+      };
+
+      setUserPointsMap(syncedMap);
       setUserRole('user');
       setCurrentUserEmail(cleanId);
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast(`🔓 Logged in as ${cleanId}`);
+      showToast(`🔓 Logged in as ${cleanId} (${userPts} MuMu Points)`);
     } else {
       setLoginError('Invalid Mail ID or Password. If you are a new user, please Register first.');
     }
@@ -603,7 +600,13 @@ export default function App() {
     }
 
     setIsVerifyingEmail(true);
-    const verification = await verifyGmailWithGoogle(regEmail, registeredUsers);
+    const latestCloud = await fetchFromCloud(true);
+    const currentUsersList = Array.isArray(latestCloud?.registeredUsers)
+      ? latestCloud.registeredUsers
+      : registeredUsers;
+    const currentCloudPoints = latestCloud?.userPointsMap || userPointsMap;
+
+    const verification = await verifyGmailWithGoogle(regEmail, currentUsersList);
     setIsVerifyingEmail(false);
     setEmailVerifiedStatus(verification);
 
@@ -613,16 +616,16 @@ export default function App() {
     }
 
     const cleanMail = verification.email.toLowerCase();
+    const safeKey = emailToFirebaseKey(cleanMail);
 
     if (
       cleanMail === 'admin@nexus.com' ||
-      registeredUsers.some((u) => u.email.toLowerCase() === cleanMail)
+      currentUsersList.some((u) => u.email.toLowerCase() === cleanMail)
     ) {
       setRegError('This Gmail ID is already registered. Please switch to Login.');
       return;
     }
 
-    // Initialize brand-new user with strictly 0 MuMu points
     const newUser = {
       email: cleanMail,
       password: regPassword,
@@ -630,15 +633,15 @@ export default function App() {
       createdAt: Date.now()
     };
 
-    const updatedUsers = [...registeredUsers, newUser];
+    const updatedUsers = [...currentUsersList, newUser];
     const updatedPointsMap = {
-      ...userPointsMap,
-      [cleanMail]: 0
+      ...sanitizePointsMapForFirebase(currentCloudPoints),
+      [safeKey]: 0
     };
 
     setRegisteredUsers(updatedUsers);
     setUserPointsMap(updatedPointsMap);
-    pushToCloud({ registeredUsers: updatedUsers, userPointsMap: updatedPointsMap });
+    await pushToCloud({ registeredUsers: updatedUsers, userPointsMap: updatedPointsMap });
 
     setUserRole('user');
     setCurrentUserEmail(cleanMail);
@@ -646,7 +649,7 @@ export default function App() {
     setRegEmail('');
     setRegPassword('');
     setEmailVerifiedStatus(null);
-    showToast(`✅ Google Verified! Registered ${cleanMail} with 0 MuMu Points.`);
+    showToast(`✅ Registered ${cleanMail} with 0 MuMu Points!`);
   };
 
   const handleLogout = () => {
@@ -658,13 +661,10 @@ export default function App() {
   };
 
   // ============================================================================
-  // 🔒 SNIPPET HANDLERS (STRICTLY ADMIN ONLY)
+  // 🔒 SNIPPET HANDLERS (STRICTLY ADMIN ONLY + WHATSAPP "READ MORE" + FULL COPY)
   // ============================================================================
   const openAddSnippetModal = () => {
-    if (userRole !== 'admin') {
-      showToast('🔒 Only Admin can add snippets.');
-      return;
-    }
+    if (userRole !== 'admin') return;
     setEditingSnippet(null);
     setSnippetTitle('');
     setSnippetCategory('JS');
@@ -673,10 +673,7 @@ export default function App() {
   };
 
   const openEditSnippetModal = (snippet) => {
-    if (userRole !== 'admin') {
-      showToast('🔒 Only Admin can edit snippets.');
-      return;
-    }
+    if (userRole !== 'admin') return;
     setEditingSnippet(snippet);
     setSnippetTitle(snippet.title);
     setSnippetCategory(snippet.category || 'JS');
@@ -720,15 +717,23 @@ export default function App() {
     showToast('🗑️ Snippet deleted by Admin.');
   };
 
-  const handleCopyCode = (id, code) => {
-    navigator.clipboard.writeText(code);
+  // Always copies 100% of the full code, even when collapsed in "Read more..."
+  const handleCopyCode = (id, fullCodeText) => {
+    navigator.clipboard.writeText(fullCodeText);
     setCopiedId(id);
-    showToast('📋 Code copied to clipboard!');
+    showToast('📋 Full code copied to clipboard!');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const toggleSnippetExpand = (id) => {
+    setExpandedSnippets((prev) => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
   // ============================================================================
-  // 🤖 HIGH-ACCURACY LIVE AI ENGINE + RICH CODE BLOCK RENDERER
+  // 🤖 BUILT-IN MULTI-CHANNEL LIVE AI ENGINE (Works Out-of-the-Box)
   // ============================================================================
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
@@ -757,15 +762,16 @@ export default function App() {
     setIsAiLoading(true);
 
     const expertSystemPrompt = `You are Aura, an elite, highly accurate AI software engineer, computer science tutor, and friendly mentor inside Nexus Studio, built for Prince Rodrigues.
-Rules for every response:
-1. Give 100% accurate, complete, well-structured answers. Never give vague or generic placeholders.
-2. When asked to write code, provide clean, working, well-commented code inside markdown code blocks (\`\`\`language ... \`\`\`) along with a brief explanation and sample output.
-3. When greeted (e.g., hi, hello, good morning), respond warmly and naturally like a smart human collaborator.`;
+Rules:
+1. Give 100% accurate, complete, well-structured answers.
+2. When asked to write code, provide clean, working code inside markdown code blocks (\`\`\`language ... \`\`\`) with a brief explanation.
+3. Respond warmly and naturally to greetings.`;
 
-    // 1. Primary: Official Google Gemini Models (High-Accuracy Low Temperature)
+    // 1. Official Google Gemini API (Compatible with all v1beta models)
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
-      const geminiContents = updatedHistory.slice(-10).map((msg) => {
-        const parts = [{ text: msg.text }];
+      const geminiContents = updatedHistory.slice(-8).map((msg, idx) => {
+        const textPrefix = idx === 0 && msg.sender === 'user' ? `${expertSystemPrompt}\n\nUser: ` : '';
+        const parts = [{ text: `${textPrefix}${msg.text}` }];
         if (msg.image) {
           const matches = msg.image.match(/^data:(.+);base64,(.+)$/);
           if (matches) {
@@ -787,13 +793,8 @@ Rules for every response:
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                systemInstruction: { parts: [{ text: expertSystemPrompt }] },
                 contents: geminiContents,
-                generationConfig: {
-                  temperature: 0.35,
-                  topP: 0.95,
-                  maxOutputTokens: 4096
-                }
+                generationConfig: { temperature: 0.35, maxOutputTokens: 4096 }
               })
             }
           );
@@ -807,60 +808,81 @@ Rules for every response:
             }
           }
         } catch (err) {
-          console.warn(`Gemini ${modelName} attempt failed:`, err);
+          // Try next model
         }
       }
     }
 
-    // 2. Secondary: Live OpenAI-Compatible Reasoning Endpoint
-    try {
-      const openAiMessages = [
-        { role: 'system', content: expertSystemPrompt },
-        ...updatedHistory.slice(-10).map((msg) => {
-          if (msg.image) {
+    // 2. Built-in Multi-Model OpenAI-Compatible Endpoint (Tries 'openai', 'openai-large', 'mistral')
+    const fallbackModels = ['openai', 'openai-large', 'mistral'];
+    for (const fbModel of fallbackModels) {
+      try {
+        const openAiMessages = [
+          { role: 'system', content: expertSystemPrompt },
+          ...updatedHistory.slice(-6).map((msg) => {
+            if (msg.image) {
+              return {
+                role: msg.sender === 'user' ? 'user' : 'assistant',
+                content: [
+                  { type: 'text', text: msg.text || 'Analyze this image in detail.' },
+                  { type: 'image_url', image_url: { url: msg.image } }
+                ]
+              };
+            }
             return {
               role: msg.sender === 'user' ? 'user' : 'assistant',
-              content: [
-                { type: 'text', text: msg.text || 'Analyze this image in detail.' },
-                { type: 'image_url', image_url: { url: msg.image } }
-              ]
+              content: msg.text
             };
+          })
+        ];
+
+        const liveRes = await fetch('https://text.pollinations.ai/openai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: fbModel,
+            temperature: 0.35,
+            messages: openAiMessages
+          })
+        });
+
+        if (liveRes.ok) {
+          const data = await liveRes.json();
+          const liveReply = data?.choices?.[0]?.message?.content;
+          if (liveReply) {
+            setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply }]);
+            setIsAiLoading(false);
+            return;
           }
-          return {
-            role: msg.sender === 'user' ? 'user' : 'assistant',
-            content: msg.text
-          };
-        })
-      ];
+        }
+      } catch (err) {
+        // Proceed to next model
+      }
+    }
 
-      const liveRes = await fetch('https://text.pollinations.ai/openai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'openai',
-          temperature: 0.35,
-          messages: openAiMessages
-        })
-      });
-
-      if (liveRes.ok) {
-        const data = await liveRes.json();
-        const liveReply = data?.choices?.[0]?.message?.content;
-        if (liveReply) {
-          setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply }]);
+    // 3. Direct GET Stream Endpoint (Zero CORS / Payload Failures)
+    try {
+      const promptQuery = encodeURIComponent(
+        `You are Aura, an expert coding and study AI assistant for Prince. Answer accurately and provide clean code if requested: ${userMessage}`
+      );
+      const getRes = await fetch(`https://text.pollinations.ai/${promptQuery}`);
+      if (getRes.ok) {
+        const textReply = await getRes.text();
+        if (textReply && textReply.trim()) {
+          setChatHistory([...updatedHistory, { sender: 'aura', text: textReply.trim() }]);
           setIsAiLoading(false);
           return;
         }
       }
     } catch (err) {
-      console.error('Live AI Fallback Error:', err);
+      console.error('AI connection error:', err);
     }
 
     setChatHistory([
       ...updatedHistory,
       {
         sender: 'aura',
-        text: '⚠️ Could not reach the AI server. Please check your internet connection or verify VITE_GEMINI_API_KEY in Vercel.'
+        text: '⚠️ Network connection was interrupted. Please check your internet connection and try sending your message again.'
       }
     ]);
     setIsAiLoading(false);
@@ -1201,7 +1223,6 @@ Rules for every response:
                     className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
-                {/* STRICTLY ADMIN ONLY CAN ADD SNIPPETS */}
                 {userRole === 'admin' && (
                   <button 
                     onClick={openAddSnippetModal}
@@ -1213,52 +1234,92 @@ Rules for every response:
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredSnippets.map((snippet, index) => (
-                <div 
-                  key={snippet.id} 
-                  style={{ animationDelay: `${index * 50}ms` }}
-                  className="animate-fade-up bg-[#12121a] p-5 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col"
-                >
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/20">
-                      {snippet.category || 'CODE'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button 
-                        onClick={() => handleCopyCode(snippet.id, snippet.code)}
-                        className="p-1.5 text-gray-400 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all"
-                        title="Copy Code"
-                      >
-                        {copiedId === snippet.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      </button>
-                      {/* STRICTLY ADMIN ONLY CAN EDIT OR DELETE SNIPPETS */}
-                      {userRole === 'admin' && (
-                        <>
-                          <button 
-                            onClick={() => openEditSnippetModal(snippet)}
-                            className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                            title="Edit Snippet (Admin Only)"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteSnippet(snippet.id)}
-                            className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                            title="Delete Snippet (Admin Only)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+              {filteredSnippets.map((snippet, index) => {
+                const codeLines = (snippet.code || '').split('\n');
+                const isLongSnippet = codeLines.length > 6 || (snippet.code || '').length > 220;
+                const isExpanded = Boolean(expandedSnippets[snippet.id]);
+
+                const displayedCode =
+                  isLongSnippet && !isExpanded
+                    ? codeLines.slice(0, 6).join('\n').slice(0, 220) + '...'
+                    : snippet.code;
+
+                return (
+                  <div 
+                    key={snippet.id} 
+                    style={{ animationDelay: `${index * 50}ms` }}
+                    className="animate-fade-up bg-[#12121a] p-5 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col"
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/20">
+                        {snippet.category || 'CODE'}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {/* ALWAYS COPIES 100% FULL SNIPPET.CODE EVEN WHEN COLLAPSED */}
+                        <button 
+                          onClick={() => handleCopyCode(snippet.id, snippet.code)}
+                          className="px-2 py-1 text-gray-300 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all flex items-center gap-1 text-xs"
+                          title="Copy Full Code"
+                        >
+                          {copiedId === snippet.id ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span className="text-emerald-400 font-semibold">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                        {userRole === 'admin' && (
+                          <>
+                            <button 
+                              onClick={() => openEditSnippetModal(snippet)}
+                              className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 transition-all"
+                              title="Edit Snippet (Admin Only)"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteSnippet(snippet.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 transition-all"
+                              title="Delete Snippet (Admin Only)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <h3 className="font-bold text-white text-lg mb-3">{snippet.title}</h3>
+                    <div className="bg-[#050505] rounded-lg border border-white/5 overflow-hidden flex flex-col">
+                      <pre className="p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                        {displayedCode}
+                      </pre>
+                      {isLongSnippet && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSnippetExpand(snippet.id)}
+                          className="w-full py-2 px-4 bg-indigo-500/10 hover:bg-indigo-500/20 border-t border-white/5 text-indigo-400 text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                        >
+                          {isExpanded ? (
+                            <>
+                              Show less <ChevronUp className="w-3.5 h-3.5" />
+                            </>
+                          ) : (
+                            <>
+                              Read more... <ChevronDown className="w-3.5 h-3.5" />
+                            </>
+                          )}
+                        </button>
                       )}
                     </div>
                   </div>
-                  <h3 className="font-bold text-white text-lg mb-3">{snippet.title}</h3>
-                  <pre className="bg-[#050505] p-4 rounded-lg text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap flex-1 border border-white/5">
-                    {snippet.code}
-                  </pre>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -1272,9 +1333,9 @@ Rules for every response:
                   Gen-Z Logic & Brain Arcade
                 </h1>
                 <p className="text-gray-400 text-sm">
-                  {activeAccountKey
-                    ? `Playing as ${activeAccountKey} — Your ID Balance: ${mumuPoints} MuMu Points`
-                    : 'Login or Register to save earned MuMu points to your personal ID!'}
+                  {activeEmail
+                    ? `Logged in as ${activeEmail} — Your Personal ID Balance: ${mumuPoints} MuMu Points`
+                    : 'Login or Register to sync earned MuMu points with your personal Gmail ID!'}
                 </p>
               </div>
               {activeGame && (
@@ -1467,7 +1528,9 @@ Rules for every response:
                 <h1 className="text-xl md:text-2xl font-bold text-indigo-400 flex items-center gap-2">
                   <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Companion
                 </h1>
-                <p className="text-xs text-gray-400">High-Accuracy Generative AI & Multimodal Code Mentor</p>
+                <p className="text-xs text-gray-400">
+                  High-Accuracy Generative AI & Multimodal Code Mentor
+                </p>
               </div>
               <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
                 ● Live AI Online
@@ -1496,7 +1559,7 @@ Rules for every response:
                     <Sparkles className="w-4 h-4 text-white animate-spin" />
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is generating an accurate response...
+                    Aura is generating response...
                   </div>
                 </div>
               )}
@@ -1692,8 +1755,8 @@ Rules for every response:
               <Trophy className="w-4 h-4 text-yellow-500" />
               <div>
                 <span className="text-xs font-bold text-gray-300 block">MuMu Vault</span>
-                <span className="text-[10px] text-gray-500 block truncate max-w-[120px]">
-                  {activeAccountKey || 'Guest (Not Logged In)'}
+                <span className="text-[10px] text-gray-500 block truncate max-w-[125px]">
+                  {activeEmail || 'Guest (0 Pts)'}
                 </span>
               </div>
             </div>
@@ -1726,7 +1789,7 @@ Rules for every response:
                     {userRole === 'admin' ? 'Nexus Admin' : currentUserEmail}
                   </div>
                   <div className="text-[10px] text-emerald-400 uppercase tracking-wider">
-                    {userRole === 'admin' ? 'Administrator' : `${mumuPoints} MuMu Pts`}
+                    {mumuPoints} MuMu Pts Synced
                   </div>
                 </div>
               </div>
@@ -1783,7 +1846,7 @@ Rules for every response:
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Code</label>
                 <textarea
-                  rows={5}
+                  rows={6}
                   value={snippetCode}
                   onChange={(e) => setSnippetCode(e.target.value)}
                   placeholder="Paste your code here..."
@@ -1804,9 +1867,7 @@ Rules for every response:
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* 🔐 LOGIN & NEW USER REGISTRATION MODAL (No Admin Details Shown)       */}
-      {/* ==================================================================== */}
+      {/* --- LOGIN & NEW USER REGISTRATION MODAL --- */}
       {showLogin && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full shadow-2xl relative animate-pop-in">
@@ -1827,7 +1888,7 @@ Rules for every response:
               </h2>
               <p className="text-gray-400 text-xs mt-1">
                 {authMode === 'login'
-                  ? 'Sign in to access your personal MuMu Points & AI tools'
+                  ? 'Sign in to load the exact MuMu Points synced to your Mail ID'
                   : 'Register with a real Google Gmail ID (Starts with 0 MuMu Points)'}
               </p>
             </div>
