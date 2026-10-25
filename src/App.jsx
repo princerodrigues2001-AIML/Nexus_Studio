@@ -13,7 +13,6 @@ import {
 // ============================================================================
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
 const RAW_FIREBASE_URL = (import.meta.env.VITE_FIREBASE_DB_URL || "").trim();
-
 function resolveFirebaseDatabaseUrl(rawUrl) {
   if (!rawUrl || rawUrl.includes('PASTE_YOUR')) return '';
   const dbMatch = rawUrl.match(/database\/([a-zA-Z0-9-]+)\//);
@@ -325,7 +324,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hey Prince! 👋 I'm Aura, your AI coding and study mentor. Ask me any coding problem, algorithm, concept, or attach a screenshot—I'll generate an accurate, detailed solution in real time!" 
+      text: "Hey! 👋 I'm Aura, your AI coding and study mentor.This is new Project and It does more mistakes" 
     }
   ]);
   const chatEndRef = useRef(null);
