@@ -6,7 +6,7 @@ import {
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
   UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, 
-  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle
+  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle, Download
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -106,6 +106,64 @@ function formatLeadTime(mins) {
   if (mins >= 60 && mins % 60 === 0) return `${mins / 60}h before`;
   if (mins > 60) return `${Math.floor(mins / 60)}h ${mins % 60}m before`;
   return `${mins}m before`;
+}
+
+function formatGoogleCalendarDate(ms) {
+  return new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+function buildGoogleCalendarUrl(task, userEmail) {
+  const deadlineMs = task.deadlineTimestamp || new Date(task.deadline).getTime();
+  const reminderMins = Number(task.reminderMinutes) || 30;
+  const startMs =
+    task.deadlineType === 'reminder'
+      ? deadlineMs - reminderMins * 60 * 1000
+      : deadlineMs - 30 * 60 * 1000;
+  const endMs = Math.max(deadlineMs, startMs + 15 * 60 * 1000);
+  const datesParam = `${formatGoogleCalendarDate(startMs)}/${formatGoogleCalendarDate(endMs)}`;
+  const title = encodeURIComponent(`⏰ TaskFlow: ${task.text}`);
+  const details = encodeURIComponent(
+    `Nexus Studio TaskFlow To-Do Reminder\nAccount ID: ${userEmail || ''}\nTask: ${task.text}\nDeadline: ${new Date(deadlineMs).toLocaleString()}\nReminder Lead Time: ${formatLeadTime(reminderMins)}`
+  );
+  const emailParam = encodeURIComponent(userEmail || '');
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${datesParam}&details=${details}&add=${emailParam}&authuser=${emailParam}`;
+}
+
+function downloadTaskIcsAlarm(task, userEmail) {
+  const deadlineMs = task.deadlineTimestamp || new Date(task.deadline).getTime();
+  const reminderMins = Number(task.reminderMinutes) || 15;
+  const startUtc = formatGoogleCalendarDate(deadlineMs - 15 * 60 * 1000);
+  const endUtc = formatGoogleCalendarDate(deadlineMs);
+  const nowUtc = formatGoogleCalendarDate(Date.now());
+  const cleanText = (task.text || 'Task').replace(/\r?\n/g, ' ');
+
+  const icsLines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Nexus Studio//TaskFlow To-Do//EN',
+    'BEGIN:VEVENT',
+    `UID:nexus-task-${task.id}@nexusstudio`,
+    `DTSTAMP:${nowUtc}`,
+    `DTSTART:${startUtc}`,
+    `DTEND:${endUtc}`,
+    `SUMMARY:⏰ ${cleanText}`,
+    `DESCRIPTION:TaskFlow To-Do Reminder for ${userEmail || 'User'} - Due at ${new Date(deadlineMs).toLocaleString()}`,
+    'BEGIN:VALARM',
+    `TRIGGER:-PT${reminderMins}M`,
+    'ACTION:DISPLAY',
+    `DESCRIPTION:Reminder: ${cleanText}`,
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([icsLines], { type: 'text/calendar;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', `taskflow-reminder-${task.id}.ics`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
@@ -413,6 +471,7 @@ export default function App() {
   const [taskReminderPreset, setTaskReminderPreset] = useState(60);
   const [customReminderValue, setCustomReminderValue] = useState(45);
   const [customReminderUnit, setCustomReminderUnit] = useState('minutes');
+  const [autoOpenGoogleCalendar, setAutoOpenGoogleCalendar] = useState(true);
   const [activeAlerts, setActiveAlerts] = useState([]);
   const [notifPermission, setNotifPermission] = useState(() =>
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
@@ -619,6 +678,7 @@ export default function App() {
     const alertObj = {
       id: `${task.id}-${Date.now()}`,
       taskId: task.id,
+      taskData: task,
       ownerEmail: forEmail,
       title: `Deadline Alert (${forEmail})`,
       taskText: task.text,
@@ -1494,11 +1554,18 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     syncUserTasks(updated);
     setNewTaskText('');
     setTaskDeadlineDateTime('');
-    showToast(
-      taskHasDeadline && taskDeadlineType === 'reminder'
-        ? `⏰ Reminder synced to all devices logged into ${activeEmail}!`
-        : `✅ Task saved & synced to ${activeEmail}!`
-    );
+
+    if (taskHasDeadline && taskDeadlineType === 'reminder' && autoOpenGoogleCalendar) {
+      const gcalUrl = buildGoogleCalendarUrl(newTaskObj, activeEmail);
+      window.open(gcalUrl, '_blank', 'noopener,noreferrer');
+      showToast(`📅 Synced & opened Google Calendar for ${activeEmail}!`);
+    } else {
+      showToast(
+        taskHasDeadline && taskDeadlineType === 'reminder'
+          ? `⏰ Reminder synced to ${activeEmail}!`
+          : `✅ Task saved & synced to ${activeEmail}!`
+      );
+    }
   };
 
   const toggleStudyTask = (id) => {
@@ -2144,7 +2211,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   <CheckSquare className="w-7 h-7 text-emerald-400" /> TaskFlow To-Do
                 </h1>
                 <p className="text-gray-400 text-sm">
-                  Reminders notify all devices logged into <span className="text-emerald-400 font-semibold">{activeEmail}</span> only
+                  Synced with Google Calendar & Firebase for <span className="text-emerald-400 font-semibold">{activeEmail}</span>
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2154,7 +2221,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                     onClick={requestBrowserNotificationPermission}
                     className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
                   >
-                    <Bell className="w-3.5 h-3.5" /> Enable Push Alerts
+                    <Bell className="w-3.5 h-3.5" /> Enable Web Alerts
                   </button>
                 )}
                 <button
@@ -2248,7 +2315,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                           <Bell className="w-4 h-4" /> Reminder Deadline
                         </div>
                         <p className="text-[11px] text-gray-400 mt-1">
-                          Notifies all devices logged into your email ID when deadline is near.
+                          Syncs with Google Calendar & Web Alerts to ring on mobile even when browser is closed.
                         </p>
                       </button>
                     </div>
@@ -2310,6 +2377,29 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                           </select>
                         </div>
                       )}
+
+                      <div
+                        onClick={() => setAutoOpenGoogleCalendar(!autoOpenGoogleCalendar)}
+                        className="mt-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Calendar className="w-4 h-4 text-cyan-400 shrink-0" />
+                          <div>
+                            <div className="text-xs font-bold text-cyan-300">
+                              Sync with Google Calendar ({activeEmail})
+                            </div>
+                            <div className="text-[11px] text-gray-400">
+                              Rings natively on your mobile & laptop even when browser is closed
+                            </div>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={autoOpenGoogleCalendar}
+                          readOnly
+                          className="w-4 h-4 accent-cyan-400"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2384,7 +2474,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                                 >
                                   <Bell className="w-3 h-3" />
                                   {isNotifiedOnThisDevice || isWithinReminderWindow
-                                    ? 'Alert Active across your devices'
+                                    ? 'Alert Active'
                                     : `Alert: ${formatLeadTime(task.reminderMinutes)}`}
                                 </span>
                               )}
@@ -2392,13 +2482,41 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={() => deleteStudyTask(task.id)}
-                        className="text-gray-500 hover:text-red-400 p-1.5 self-end sm:self-center"
-                        title="Delete Task"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                      <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                        {task.hasDeadline && targetMs > 0 && !task.done && (
+                          <>
+                            <a
+                              href={buildGoogleCalendarUrl(task, activeEmail)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-xs font-bold flex items-center gap-1 transition-all"
+                              title="Sync to Google Calendar (Rings when browser is closed)"
+                            >
+                              <Calendar className="w-3.5 h-3.5" /> Google Cal
+                            </a>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadTaskIcsAlarm(task, activeEmail);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 transition-all"
+                              title="Download Native Phone Calendar Alarm (.ics)"
+                            >
+                              <Download className="w-3.5 h-3.5" /> .ICS
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => deleteStudyTask(task.id)}
+                          className="text-gray-500 hover:text-red-400 p-1.5"
+                          title="Delete Task"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -2618,7 +2736,17 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                 <p className="text-xs text-gray-300 mt-1">
                   Deadline: <span className="text-amber-300 font-semibold">{alertItem.deadlineText}</span>
                 </p>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex justify-end gap-2">
+                  {alertItem.taskData && (
+                    <a
+                      href={buildGoogleCalendarUrl(alertItem.taskData, activeEmail)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"
+                    >
+                      <Calendar className="w-3.5 h-3.5" /> Google Cal
+                    </a>
+                  )}
                   <button
                     onClick={() =>
                       setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
