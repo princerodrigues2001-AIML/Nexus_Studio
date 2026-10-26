@@ -177,6 +177,24 @@ export default function App() {
     }
   });
 
+  const [userTasksMap, setUserTasksMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_user_tasks_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [userBagMap, setUserBagMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_user_bag_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   const [feedbackList, setFeedbackList] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_feedback_list');
@@ -208,7 +226,41 @@ export default function App() {
     return 0;
   };
 
+  const getTasksForEmail = (emailStr) => {
+    if (!emailStr) return DEFAULT_TASKS;
+    const clean = emailStr.trim().toLowerCase();
+    const safeKey = emailToFirebaseKey(clean);
+    const entry = userTasksMap[safeKey] ?? userTasksMap[clean];
+    if (entry !== undefined && entry !== null) {
+      if (Array.isArray(entry)) return entry;
+      if (typeof entry === 'object') return Array.isArray(entry.items) ? entry.items : [];
+    }
+    const foundUser = registeredUsers.find((u) => u.email.toLowerCase() === clean);
+    if (foundUser && foundUser.tasksInitialized) {
+      return Array.isArray(foundUser.studyTasks) ? foundUser.studyTasks : [];
+    }
+    return DEFAULT_TASKS;
+  };
+
+  const getBagForEmail = (emailStr) => {
+    if (!emailStr) return DEFAULT_BAG;
+    const clean = emailStr.trim().toLowerCase();
+    const safeKey = emailToFirebaseKey(clean);
+    const entry = userBagMap[safeKey] ?? userBagMap[clean];
+    if (entry !== undefined && entry !== null) {
+      if (Array.isArray(entry)) return entry;
+      if (typeof entry === 'object') return Array.isArray(entry.items) ? entry.items : [];
+    }
+    const foundUser = registeredUsers.find((u) => u.email.toLowerCase() === clean);
+    if (foundUser && foundUser.bagInitialized) {
+      return Array.isArray(foundUser.bagItems) ? foundUser.bagItems : [];
+    }
+    return DEFAULT_BAG;
+  };
+
   const mumuPoints = activeEmail ? getPointsForEmail(activeEmail) : 0;
+  const currentStudyTasks = activeEmail ? getTasksForEmail(activeEmail) : DEFAULT_TASKS;
+  const currentBagItems = activeEmail ? getBagForEmail(activeEmail) : DEFAULT_BAG;
 
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -237,29 +289,11 @@ export default function App() {
     }
   });
 
-  const [studyTasks, setStudyTasks] = useState(() => {
-    try {
-      const saved = localStorage.getItem('nexus_study_tasks');
-      return saved ? JSON.parse(saved) : DEFAULT_TASKS;
-    } catch {
-      return DEFAULT_TASKS;
-    }
-  });
-
-  const [bagItems, setBagItems] = useState(() => {
-    try {
-      const saved = localStorage.getItem('nexus_bag_items');
-      return saved ? JSON.parse(saved) : DEFAULT_BAG;
-    } catch {
-      return DEFAULT_BAG;
-    }
-  });
-
   const stateRef = useRef({
     snippets,
     personalSnippets,
-    studyTasks,
-    bagItems,
+    userTasksMap,
+    userBagMap,
     userPointsMap,
     registeredUsers,
     feedbackList
@@ -270,13 +304,13 @@ export default function App() {
     stateRef.current = {
       snippets,
       personalSnippets,
-      studyTasks,
-      bagItems,
+      userTasksMap,
+      userBagMap,
       userPointsMap,
       registeredUsers,
       feedbackList
     };
-  }, [snippets, personalSnippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList]);
+  }, [snippets, personalSnippets, userTasksMap, userBagMap, userPointsMap, registeredUsers, feedbackList]);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -342,6 +376,24 @@ export default function App() {
     return cleanMap;
   };
 
+  const sanitizeListMapForFirebase = (rawMap) => {
+    const cleanMap = {};
+    if (!rawMap || typeof rawMap !== 'object') return cleanMap;
+    Object.entries(rawMap).forEach(([k, val]) => {
+      const safeK = k.includes('@') || k.includes('.') ? emailToFirebaseKey(k) : k;
+      if (!safeK) return;
+      if (Array.isArray(val)) {
+        cleanMap[safeK] = { updatedAt: Date.now(), items: val };
+      } else if (val && typeof val === 'object') {
+        cleanMap[safeK] = {
+          updatedAt: val.updatedAt || Date.now(),
+          items: Array.isArray(val.items) ? val.items : []
+        };
+      }
+    });
+    return cleanMap;
+  };
+
   const pushToCloud = async (overrideData = {}) => {
     if (!CLEAN_FIREBASE_URL) return;
     lastLocalWriteRef.current = Date.now();
@@ -350,12 +402,18 @@ export default function App() {
     const safePoints = sanitizePointsMapForFirebase(
       overrideData.userPointsMap ?? stateRef.current.userPointsMap
     );
+    const safeTasksMap = sanitizeListMapForFirebase(
+      overrideData.userTasksMap ?? stateRef.current.userTasksMap
+    );
+    const safeBagMap = sanitizeListMapForFirebase(
+      overrideData.userBagMap ?? stateRef.current.userBagMap
+    );
 
     const payload = {
       snippets: overrideData.snippets ?? stateRef.current.snippets,
       personalSnippets: overrideData.personalSnippets ?? stateRef.current.personalSnippets,
-      studyTasks: overrideData.studyTasks ?? stateRef.current.studyTasks,
-      bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
+      userTasksMap: safeTasksMap,
+      userBagMap: safeBagMap,
       userPointsMap: safePoints,
       registeredUsers: overrideData.registeredUsers ?? stateRef.current.registeredUsers,
       feedbackList: overrideData.feedbackList ?? stateRef.current.feedbackList,
@@ -399,13 +457,13 @@ export default function App() {
           setPersonalSnippets(data.personalSnippets);
           localStorage.setItem('nexus_personal_snippets', JSON.stringify(data.personalSnippets));
         }
-        if (Array.isArray(data.studyTasks)) {
-          setStudyTasks(data.studyTasks);
-          localStorage.setItem('nexus_study_tasks', JSON.stringify(data.studyTasks));
+        if (data.userTasksMap && typeof data.userTasksMap === 'object') {
+          setUserTasksMap(data.userTasksMap);
+          localStorage.setItem('nexus_user_tasks_map', JSON.stringify(data.userTasksMap));
         }
-        if (Array.isArray(data.bagItems)) {
-          setBagItems(data.bagItems);
-          localStorage.setItem('nexus_bag_items', JSON.stringify(data.bagItems));
+        if (data.userBagMap && typeof data.userBagMap === 'object') {
+          setUserBagMap(data.userBagMap);
+          localStorage.setItem('nexus_user_bag_map', JSON.stringify(data.userBagMap));
         }
         if (data.userPointsMap && typeof data.userPointsMap === 'object') {
           setUserPointsMap(data.userPointsMap);
@@ -443,12 +501,12 @@ export default function App() {
   useEffect(() => localStorage.setItem('nexus_user_email', currentUserEmail), [currentUserEmail]);
   useEffect(() => localStorage.setItem('nexus_registered_users', JSON.stringify(registeredUsers)), [registeredUsers]);
   useEffect(() => localStorage.setItem('nexus_user_points_map', JSON.stringify(userPointsMap)), [userPointsMap]);
+  useEffect(() => localStorage.setItem('nexus_user_tasks_map', JSON.stringify(userTasksMap)), [userTasksMap]);
+  useEffect(() => localStorage.setItem('nexus_user_bag_map', JSON.stringify(userBagMap)), [userBagMap]);
   useEffect(() => localStorage.setItem('nexus_feedback_list', JSON.stringify(feedbackList)), [feedbackList]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
   useEffect(() => localStorage.setItem('nexus_personal_snippets', JSON.stringify(personalSnippets)), [personalSnippets]);
-  useEffect(() => localStorage.setItem('nexus_study_tasks', JSON.stringify(studyTasks)), [studyTasks]);
-  useEffect(() => localStorage.setItem('nexus_bag_items', JSON.stringify(bagItems)), [bagItems]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -514,6 +572,8 @@ export default function App() {
       ? latestCloud.registeredUsers
       : registeredUsers;
     const activeCloudPointsMap = latestCloud?.userPointsMap || userPointsMap;
+    const activeCloudTasksMap = latestCloud?.userTasksMap || userTasksMap;
+    const activeCloudBagMap = latestCloud?.userBagMap || userBagMap;
 
     if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
       setUserRole('admin');
@@ -522,7 +582,7 @@ export default function App() {
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast('🔓 Welcome back, Admin! Personal Snippets unlocked.');
+      showToast('🔓 Welcome back, Admin! Personal Vault & Data synced.');
       return;
     }
 
@@ -540,12 +600,34 @@ export default function App() {
             ? matchedUser.points
             : 0;
 
-      const syncedMap = {
+      const syncedPointsMap = {
         ...sanitizePointsMapForFirebase(activeCloudPointsMap),
         [safeKey]: userPts
       };
 
-      setUserPointsMap(syncedMap);
+      const existingTasksEntry = activeCloudTasksMap[safeKey];
+      const userTasks = existingTasksEntry !== undefined
+        ? (Array.isArray(existingTasksEntry) ? existingTasksEntry : (existingTasksEntry.items || []))
+        : (matchedUser.tasksInitialized ? (matchedUser.studyTasks || []) : DEFAULT_TASKS);
+
+      const existingBagEntry = activeCloudBagMap[safeKey];
+      const userBag = existingBagEntry !== undefined
+        ? (Array.isArray(existingBagEntry) ? existingBagEntry : (existingBagEntry.items || []))
+        : (matchedUser.bagInitialized ? (matchedUser.bagItems || []) : DEFAULT_BAG);
+
+      const syncedTasksMap = {
+        ...sanitizeListMapForFirebase(activeCloudTasksMap),
+        [safeKey]: { updatedAt: Date.now(), items: userTasks }
+      };
+
+      const syncedBagMap = {
+        ...sanitizeListMapForFirebase(activeCloudBagMap),
+        [safeKey]: { updatedAt: Date.now(), items: userBag }
+      };
+
+      setUserPointsMap(syncedPointsMap);
+      setUserTasksMap(syncedTasksMap);
+      setUserBagMap(syncedBagMap);
       setUserRole('user');
       setCurrentUserEmail(cleanId);
       if (activeTab === 'personalSnippets') {
@@ -555,7 +637,7 @@ export default function App() {
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast(`🔓 Logged in as ${cleanId} (${userPts} MuMu Points)`);
+      showToast(`🔓 Logged in as ${cleanId}`);
     } else {
       setLoginError('Invalid Mail ID or Password. If you are a new user, please Register first.');
     }
@@ -593,6 +675,8 @@ export default function App() {
       ? latestCloud.registeredUsers
       : registeredUsers;
     const currentCloudPoints = latestCloud?.userPointsMap || userPointsMap;
+    const currentCloudTasks = latestCloud?.userTasksMap || userTasksMap;
+    const currentCloudBag = latestCloud?.userBagMap || userBagMap;
 
     const verification = await verifyGmailWithGoogle(regEmail, currentUsersList);
     setIsVerifyingEmail(false);
@@ -618,6 +702,10 @@ export default function App() {
       email: cleanMail,
       password: regPassword,
       points: 0,
+      studyTasks: DEFAULT_TASKS,
+      tasksInitialized: true,
+      bagItems: DEFAULT_BAG,
+      bagInitialized: true,
       createdAt: Date.now()
     };
 
@@ -626,10 +714,26 @@ export default function App() {
       ...sanitizePointsMapForFirebase(currentCloudPoints),
       [safeKey]: 0
     };
+    const updatedTasksMap = {
+      ...sanitizeListMapForFirebase(currentCloudTasks),
+      [safeKey]: { updatedAt: Date.now(), items: DEFAULT_TASKS }
+    };
+    const updatedBagMap = {
+      ...sanitizeListMapForFirebase(currentCloudBag),
+      [safeKey]: { updatedAt: Date.now(), items: DEFAULT_BAG }
+    };
 
     setRegisteredUsers(updatedUsers);
     setUserPointsMap(updatedPointsMap);
-    await pushToCloud({ registeredUsers: updatedUsers, userPointsMap: updatedPointsMap });
+    setUserTasksMap(updatedTasksMap);
+    setUserBagMap(updatedBagMap);
+
+    await pushToCloud({
+      registeredUsers: updatedUsers,
+      userPointsMap: updatedPointsMap,
+      userTasksMap: updatedTasksMap,
+      userBagMap: updatedBagMap
+    });
 
     setUserRole('user');
     setCurrentUserEmail(cleanMail);
@@ -640,7 +744,7 @@ export default function App() {
     setRegEmail('');
     setRegPassword('');
     setEmailVerifiedStatus(null);
-    showToast(`✅ Registered ${cleanMail} with 0 MuMu Points!`);
+    showToast(`✅ Registered ${cleanMail}! Personal Planner & Routine initialized.`);
   };
 
   const handleLogout = () => {
@@ -1121,48 +1225,88 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     }
   };
 
+  const syncUserTasks = (nextTasks) => {
+    if (!activeEmail || !activeSafeKey) return;
+    const updatedTasksMap = {
+      ...sanitizeListMapForFirebase(userTasksMap),
+      [activeSafeKey]: { updatedAt: Date.now(), items: nextTasks }
+    };
+    const updatedUsers = registeredUsers.map((u) =>
+      u.email.toLowerCase() === activeEmail
+        ? { ...u, studyTasks: nextTasks, tasksInitialized: true }
+        : u
+    );
+    setUserTasksMap(updatedTasksMap);
+    setRegisteredUsers(updatedUsers);
+    pushToCloud({ userTasksMap: updatedTasksMap, registeredUsers: updatedUsers });
+  };
+
   const handleAddTask = (e) => {
     e.preventDefault();
     if (!newTaskText.trim()) return;
-    const updated = [...studyTasks, { id: Date.now(), text: newTaskText, done: false }];
-    setStudyTasks(updated);
-    pushToCloud({ studyTasks: updated });
+    if (!activeEmail) {
+      openAuthModal('login');
+      return;
+    }
+    const updated = [...currentStudyTasks, { id: Date.now(), text: newTaskText.trim(), done: false }];
+    syncUserTasks(updated);
     setNewTaskText('');
-    showToast('✅ Study goal added & synced!');
+    showToast(`✅ Goal saved & synced to ${activeEmail}!`);
   };
 
   const toggleStudyTask = (id) => {
-    const updated = studyTasks.map(t => t.id === id ? { ...t, done: !t.done } : t);
-    setStudyTasks(updated);
-    pushToCloud({ studyTasks: updated });
+    if (!activeEmail) return;
+    const updated = currentStudyTasks.map(t => t.id === id ? { ...t, done: !t.done } : t);
+    syncUserTasks(updated);
   };
 
   const deleteStudyTask = (id) => {
-    const updated = studyTasks.filter(t => t.id !== id);
-    setStudyTasks(updated);
-    pushToCloud({ studyTasks: updated });
+    if (!activeEmail) return;
+    const updated = currentStudyTasks.filter(t => t.id !== id);
+    syncUserTasks(updated);
+    showToast('🗑️ Goal deleted & synced to your ID!');
+  };
+
+  const syncUserBag = (nextBag) => {
+    if (!activeEmail || !activeSafeKey) return;
+    const updatedBagMap = {
+      ...sanitizeListMapForFirebase(userBagMap),
+      [activeSafeKey]: { updatedAt: Date.now(), items: nextBag }
+    };
+    const updatedUsers = registeredUsers.map((u) =>
+      u.email.toLowerCase() === activeEmail
+        ? { ...u, bagItems: nextBag, bagInitialized: true }
+        : u
+    );
+    setUserBagMap(updatedBagMap);
+    setRegisteredUsers(updatedUsers);
+    pushToCloud({ userBagMap: updatedBagMap, registeredUsers: updatedUsers });
   };
 
   const handleAddBagItem = (e) => {
     e.preventDefault();
     if (!newBagItem.trim()) return;
-    const updated = [...bagItems, { id: Date.now(), text: newBagItem, packed: false }];
-    setBagItems(updated);
-    pushToCloud({ bagItems: updated });
+    if (!activeEmail) {
+      openAuthModal('login');
+      return;
+    }
+    const updated = [...currentBagItems, { id: Date.now(), text: newBagItem.trim(), packed: false }];
+    syncUserBag(updated);
     setNewBagItem('');
-    showToast('🎒 Item added & synced!');
+    showToast(`🎒 Routine item saved & synced to ${activeEmail}!`);
   };
 
   const toggleBagItem = (id) => {
-    const updated = bagItems.map(b => b.id === id ? { ...b, packed: !b.packed } : b);
-    setBagItems(updated);
-    pushToCloud({ bagItems: updated });
+    if (!activeEmail) return;
+    const updated = currentBagItems.map(b => b.id === id ? { ...b, packed: !b.packed } : b);
+    syncUserBag(updated);
   };
 
   const deleteBagItem = (id) => {
-    const updated = bagItems.filter(b => b.id !== id);
-    setBagItems(updated);
-    pushToCloud({ bagItems: updated });
+    if (!activeEmail) return;
+    const updated = currentBagItems.filter(b => b.id !== id);
+    syncUserBag(updated);
+    showToast('🗑️ Item deleted & synced to your ID!');
   };
 
   const handleSubmitFeedback = async (e) => {
@@ -1743,32 +1887,52 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       case 'studyPlanner':
         return (
           <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <h1 className="text-2xl md:text-3xl font-bold mb-2">Study Planner</h1>
-            <p className="text-gray-400 text-sm mb-6">Track your learning milestones across devices.</p>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold mb-1">Study Planner</h1>
+                <p className="text-gray-400 text-sm">
+                  Synced exclusively to your ID: <span className="text-emerald-400 font-semibold">{activeEmail}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => fetchFromCloud(true)}
+                className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 w-fit"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} /> Sync My Goals
+              </button>
+            </div>
+
             <form onSubmit={handleAddTask} className="flex gap-2 mb-6">
               <input
                 type="text"
                 value={newTaskText}
                 onChange={(e) => setNewTaskText(e.target.value)}
-                placeholder="Add a new study goal..."
+                placeholder="Add a new study goal for your ID..."
                 className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
               />
-              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg text-sm font-bold">
+              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg text-sm font-bold shrink-0">
                 Add Goal
               </button>
             </form>
+
             <div className="space-y-3">
-              {studyTasks.map(task => (
-                <div key={task.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleStudyTask(task.id)}>
-                    <input type="checkbox" checked={task.done} readOnly className="w-4 h-4 accent-emerald-500" />
-                    <span className={task.done ? 'line-through text-gray-500' : 'text-white'}>{task.text}</span>
-                  </div>
-                  <button onClick={() => deleteStudyTask(task.id)} className="text-gray-500 hover:text-red-400">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              {currentStudyTasks.length === 0 ? (
+                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 text-center text-gray-400 text-sm">
+                  No study goals in your account yet. Add your first goal above!
                 </div>
-              ))}
+              ) : (
+                currentStudyTasks.map(task => (
+                  <div key={task.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => toggleStudyTask(task.id)}>
+                      <input type="checkbox" checked={Boolean(task.done)} readOnly className="w-4 h-4 accent-emerald-500" />
+                      <span className={task.done ? 'line-through text-gray-500' : 'text-white'}>{task.text}</span>
+                    </div>
+                    <button onClick={() => deleteStudyTask(task.id)} className="text-gray-500 hover:text-red-400 p-1">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         );
@@ -1776,32 +1940,52 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       case 'bagPacker':
         return (
           <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <h1 className="text-2xl md:text-3xl font-bold mb-2">Routine & Bag Packer</h1>
-            <p className="text-gray-400 text-sm mb-6">Keep track of your daily essentials.</p>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold mb-1">Routine & Bag Packer</h1>
+                <p className="text-gray-400 text-sm">
+                  Synced exclusively to your ID: <span className="text-orange-400 font-semibold">{activeEmail}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => fetchFromCloud(true)}
+                className="bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 w-fit"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} /> Sync My Routine
+              </button>
+            </div>
+
             <form onSubmit={handleAddBagItem} className="flex gap-2 mb-6">
               <input
                 type="text"
                 value={newBagItem}
                 onChange={(e) => setNewBagItem(e.target.value)}
-                placeholder="Add item to pack..."
+                placeholder="Add routine or item to pack for your ID..."
                 className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500"
               />
-              <button type="submit" className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-3 rounded-lg text-sm font-bold">
+              <button type="submit" className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-3 rounded-lg text-sm font-bold shrink-0">
                 Add Item
               </button>
             </form>
+
             <div className="space-y-3">
-              {bagItems.map(item => (
-                <div key={item.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleBagItem(item.id)}>
-                    <input type="checkbox" checked={item.packed} readOnly className="w-4 h-4 accent-orange-500" />
-                    <span className={item.packed ? 'line-through text-gray-500' : 'text-white'}>{item.text}</span>
-                  </div>
-                  <button onClick={() => deleteBagItem(item.id)} className="text-gray-500 hover:text-red-400">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              {currentBagItems.length === 0 ? (
+                <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 text-center text-gray-400 text-sm">
+                  No routine or bag items in your account yet. Add an item above!
                 </div>
-              ))}
+              ) : (
+                currentBagItems.map(item => (
+                  <div key={item.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => toggleBagItem(item.id)}>
+                      <input type="checkbox" checked={Boolean(item.packed)} readOnly className="w-4 h-4 accent-orange-500" />
+                      <span className={item.packed ? 'line-through text-gray-500' : 'text-white'}>{item.text}</span>
+                    </div>
+                    <button onClick={() => deleteBagItem(item.id)} className="text-gray-500 hover:text-red-400 p-1">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         );
@@ -2009,11 +2193,23 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
           </button>
           <button onClick={() => handleNavigation('studyPlanner')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'studyPlanner' ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> Study Planner</div>
-            {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
+            {userRole === 'guest' ? (
+              <Lock className="w-4 h-4 text-gray-600" />
+            ) : (
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold">
+                {currentStudyTasks.length}
+              </span>
+            )}
           </button>
           <button onClick={() => handleNavigation('bagPacker')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'bagPacker' ? 'bg-orange-600/10 text-orange-400 border border-orange-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><Briefcase className="w-5 h-5" /> Routine & Packer</div>
-            {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
+            {userRole === 'guest' ? (
+              <Lock className="w-4 h-4 text-gray-600" />
+            ) : (
+              <span className="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full font-bold">
+                {currentBagItems.length}
+              </span>
+            )}
           </button>
           <button onClick={() => handleNavigation('feedback')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'feedback' ? 'bg-cyan-600/10 text-cyan-400 border border-cyan-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><MessageSquare className="w-5 h-5" /> Feedback</div>
@@ -2189,7 +2385,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               </h2>
               <p className="text-gray-400 text-xs mt-1">
                 {authMode === 'login'
-                  ? 'Sign in to load the MuMu Points synced to your Mail ID'
+                  ? 'Sign in to load the MuMu Points, Study Goals & Routine synced to your Mail ID'
                   : 'Register with a real Google Gmail ID (Starts with 0 MuMu Points)'}
               </p>
             </div>
