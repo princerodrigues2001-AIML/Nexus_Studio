@@ -5,7 +5,8 @@ import {
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
-  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare, FolderLock, ExternalLink
+  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, 
+  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -45,18 +46,26 @@ const DEFAULT_SNIPPETS = [
   }
 ];
 
-const DEFAULT_PERSONAL_SNIPPETS = [
-  { id: 101, title: 'Private Admin Config Template', category: 'GENERAL', code: 'export const ADMIN_CONFIG = {\n  syncInterval: 2500,\n  strictAuth: true\n};' }
-];
-
 const DEFAULT_TASKS = [
-  { id: 1, text: 'Review React Hooks & State', done: false },
-  { id: 2, text: 'Practice Data Structures & Algorithms', done: true }
+  { id: 1, text: 'Review React Hooks & State', done: false, hasDeadline: false },
+  { id: 2, text: 'Practice Data Structures & Algorithms', done: true, hasDeadline: false }
 ];
 
 const DEFAULT_BAG = [
   { id: 1, text: 'Laptop & Charger', packed: true },
   { id: 2, text: 'ID Card & Notebook', packed: false }
+];
+
+const REMINDER_PRESETS = [
+  { label: '1 Day', minutes: 1440 },
+  { label: '12 Hrs', minutes: 720 },
+  { label: '6 Hrs', minutes: 360 },
+  { label: '3 Hrs', minutes: 180 },
+  { label: '2 Hrs', minutes: 120 },
+  { label: '1 Hr', minutes: 60 },
+  { label: '30 Min', minutes: 30 },
+  { label: '15 Min', minutes: 15 },
+  { label: 'Custom', minutes: 'custom' }
 ];
 
 const CODELE_WORDS = [
@@ -71,6 +80,33 @@ const STROOP_COLORS = [
   { name: 'GREEN', hex: '#10b981', bg: 'bg-emerald-500 hover:bg-emerald-400' },
   { name: 'YELLOW', hex: '#eab308', bg: 'bg-yellow-500 hover:bg-yellow-400' }
 ];
+
+function playNotificationChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.6);
+  } catch {}
+}
+
+function formatLeadTime(mins) {
+  if (!mins || mins <= 0) return 'At deadline';
+  if (mins >= 1440 && mins % 1440 === 0) return `${mins / 1440}d before`;
+  if (mins >= 60 && mins % 60 === 0) return `${mins / 60}h before`;
+  if (mins > 60) return `${Math.floor(mins / 60)}h ${mins % 60}m before`;
+  return `${mins}m before`;
+}
 
 async function verifyGmailWithGoogle(rawEmail, existingUsers = []) {
   const email = rawEmail.trim().toLowerCase();
@@ -177,6 +213,15 @@ export default function App() {
     }
   });
 
+  const [userPersonalSnippetsMap, setUserPersonalSnippetsMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_user_personal_snippets_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   const [userTasksMap, setUserTasksMap] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_user_tasks_map');
@@ -226,6 +271,22 @@ export default function App() {
     return 0;
   };
 
+  const getPersonalSnippetsForEmail = (emailStr) => {
+    if (!emailStr) return [];
+    const clean = emailStr.trim().toLowerCase();
+    const safeKey = emailToFirebaseKey(clean);
+    const entry = userPersonalSnippetsMap[safeKey] ?? userPersonalSnippetsMap[clean];
+    if (entry !== undefined && entry !== null) {
+      if (Array.isArray(entry)) return entry;
+      if (typeof entry === 'object') return Array.isArray(entry.items) ? entry.items : [];
+    }
+    const foundUser = registeredUsers.find((u) => u.email.toLowerCase() === clean);
+    if (foundUser && Array.isArray(foundUser.personalSnippets)) {
+      return foundUser.personalSnippets;
+    }
+    return [];
+  };
+
   const getTasksForEmail = (emailStr) => {
     if (!emailStr) return DEFAULT_TASKS;
     const clean = emailStr.trim().toLowerCase();
@@ -259,6 +320,7 @@ export default function App() {
   };
 
   const mumuPoints = activeEmail ? getPointsForEmail(activeEmail) : 0;
+  const currentPersonalSnippets = activeEmail ? getPersonalSnippetsForEmail(activeEmail) : [];
   const currentStudyTasks = activeEmail ? getTasksForEmail(activeEmail) : DEFAULT_TASKS;
   const currentBagItems = activeEmail ? getBagForEmail(activeEmail) : DEFAULT_BAG;
 
@@ -280,18 +342,9 @@ export default function App() {
     }
   });
 
-  const [personalSnippets, setPersonalSnippets] = useState(() => {
-    try {
-      const saved = localStorage.getItem('nexus_personal_snippets');
-      return saved ? JSON.parse(saved) : DEFAULT_PERSONAL_SNIPPETS;
-    } catch {
-      return DEFAULT_PERSONAL_SNIPPETS;
-    }
-  });
-
   const stateRef = useRef({
     snippets,
-    personalSnippets,
+    userPersonalSnippetsMap,
     userTasksMap,
     userBagMap,
     userPointsMap,
@@ -303,14 +356,14 @@ export default function App() {
   useEffect(() => {
     stateRef.current = {
       snippets,
-      personalSnippets,
+      userPersonalSnippetsMap,
       userTasksMap,
       userBagMap,
       userPointsMap,
       registeredUsers,
       feedbackList
     };
-  }, [snippets, personalSnippets, userTasksMap, userBagMap, userPointsMap, registeredUsers, feedbackList]);
+  }, [snippets, userPersonalSnippetsMap, userTasksMap, userBagMap, userPointsMap, registeredUsers, feedbackList]);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -345,6 +398,17 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const [newTaskText, setNewTaskText] = useState('');
+  const [taskHasDeadline, setTaskHasDeadline] = useState(false);
+  const [taskDeadlineType, setTaskDeadlineType] = useState('simple');
+  const [taskDeadlineDateTime, setTaskDeadlineDateTime] = useState('');
+  const [taskReminderPreset, setTaskReminderPreset] = useState(60);
+  const [customReminderValue, setCustomReminderValue] = useState(45);
+  const [customReminderUnit, setCustomReminderUnit] = useState('minutes');
+  const [activeAlerts, setActiveAlerts] = useState([]);
+  const [notifPermission, setNotifPermission] = useState(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
+
   const [newBagItem, setNewBagItem] = useState('');
 
   const [activeGame, setActiveGame] = useState(null);
@@ -402,6 +466,9 @@ export default function App() {
     const safePoints = sanitizePointsMapForFirebase(
       overrideData.userPointsMap ?? stateRef.current.userPointsMap
     );
+    const safePersonalSnippetsMap = sanitizeListMapForFirebase(
+      overrideData.userPersonalSnippetsMap ?? stateRef.current.userPersonalSnippetsMap
+    );
     const safeTasksMap = sanitizeListMapForFirebase(
       overrideData.userTasksMap ?? stateRef.current.userTasksMap
     );
@@ -411,7 +478,7 @@ export default function App() {
 
     const payload = {
       snippets: overrideData.snippets ?? stateRef.current.snippets,
-      personalSnippets: overrideData.personalSnippets ?? stateRef.current.personalSnippets,
+      userPersonalSnippetsMap: safePersonalSnippetsMap,
       userTasksMap: safeTasksMap,
       userBagMap: safeBagMap,
       userPointsMap: safePoints,
@@ -453,9 +520,9 @@ export default function App() {
           setSnippets(data.snippets);
           localStorage.setItem('nexus_snippets', JSON.stringify(data.snippets));
         }
-        if (Array.isArray(data.personalSnippets)) {
-          setPersonalSnippets(data.personalSnippets);
-          localStorage.setItem('nexus_personal_snippets', JSON.stringify(data.personalSnippets));
+        if (data.userPersonalSnippetsMap && typeof data.userPersonalSnippetsMap === 'object') {
+          setUserPersonalSnippetsMap(data.userPersonalSnippetsMap);
+          localStorage.setItem('nexus_user_personal_snippets_map', JSON.stringify(data.userPersonalSnippetsMap));
         }
         if (data.userTasksMap && typeof data.userTasksMap === 'object') {
           setUserTasksMap(data.userTasksMap);
@@ -501,12 +568,12 @@ export default function App() {
   useEffect(() => localStorage.setItem('nexus_user_email', currentUserEmail), [currentUserEmail]);
   useEffect(() => localStorage.setItem('nexus_registered_users', JSON.stringify(registeredUsers)), [registeredUsers]);
   useEffect(() => localStorage.setItem('nexus_user_points_map', JSON.stringify(userPointsMap)), [userPointsMap]);
+  useEffect(() => localStorage.setItem('nexus_user_personal_snippets_map', JSON.stringify(userPersonalSnippetsMap)), [userPersonalSnippetsMap]);
   useEffect(() => localStorage.setItem('nexus_user_tasks_map', JSON.stringify(userTasksMap)), [userTasksMap]);
   useEffect(() => localStorage.setItem('nexus_user_bag_map', JSON.stringify(userBagMap)), [userBagMap]);
   useEffect(() => localStorage.setItem('nexus_feedback_list', JSON.stringify(feedbackList)), [feedbackList]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
-  useEffect(() => localStorage.setItem('nexus_personal_snippets', JSON.stringify(personalSnippets)), [personalSnippets]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -516,6 +583,82 @@ export default function App() {
     setToast(msg);
     setTimeout(() => setToast(null), 2800);
   };
+
+  const requestBrowserNotificationPermission = async () => {
+    if (typeof Notification === 'undefined') return 'unsupported';
+    if (Notification.permission === 'granted') {
+      setNotifPermission('granted');
+      return 'granted';
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      setNotifPermission(perm);
+      if (perm === 'granted') {
+        showToast('🔔 Browser Push Notifications Enabled!');
+      }
+      return perm;
+    } catch {
+      return 'default';
+    }
+  };
+
+  const triggerProfessionalAlert = (task) => {
+    playNotificationChime();
+    const formattedDeadline = new Date(task.deadline).toLocaleString();
+    const alertObj = {
+      id: `${task.id}-${Date.now()}`,
+      taskId: task.id,
+      title: 'Upcoming Task Deadline Reminder',
+      taskText: task.text,
+      deadlineText: formattedDeadline,
+      leadLabel: formatLeadTime(task.reminderMinutes)
+    };
+    setActiveAlerts((prev) => [alertObj, ...prev]);
+
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        new Notification('⏰ Nexus TaskFlow Reminder', {
+          body: `"${task.text}" is due at ${formattedDeadline} (${formatLeadTime(task.reminderMinutes)} alert).`,
+          tag: `nexus-task-${task.id}`
+        });
+      } catch {}
+    }
+  };
+
+  useEffect(() => {
+    if (!activeEmail || !activeSafeKey) return;
+    const checkReminders = () => {
+      const now = Date.now();
+      let changed = false;
+      const updatedTasks = currentStudyTasks.map((task) => {
+        if (
+          !task.done &&
+          task.hasDeadline &&
+          task.deadlineType === 'reminder' &&
+          task.deadline &&
+          !task.reminderSent
+        ) {
+          const deadlineMs = new Date(task.deadline).getTime();
+          const offsetMs = (Number(task.reminderMinutes) || 0) * 60 * 1000;
+          const triggerAtMs = deadlineMs - offsetMs;
+          if (now >= triggerAtMs) {
+            changed = true;
+            triggerProfessionalAlert(task);
+            return { ...task, reminderSent: true };
+          }
+        }
+        return task;
+      });
+
+      if (changed) {
+        syncUserTasks(updatedTasks);
+      }
+    };
+
+    checkReminders();
+    const timer = setInterval(checkReminders, 10000);
+    return () => clearInterval(timer);
+  }, [activeEmail, currentStudyTasks]);
 
   const awardPoints = (amount, label = 'Bonus') => {
     if (!activeEmail || !activeSafeKey) {
@@ -552,9 +695,6 @@ export default function App() {
   };
 
   const handleNavigation = (tab) => {
-    if (tab === 'personalSnippets' && userRole !== 'admin') {
-      return;
-    }
     if (userRole === 'guest' && tab !== 'snippetHub' && tab !== 'arcadeLounge') {
       openAuthModal('login');
       return;
@@ -572,6 +712,7 @@ export default function App() {
       ? latestCloud.registeredUsers
       : registeredUsers;
     const activeCloudPointsMap = latestCloud?.userPointsMap || userPointsMap;
+    const activeCloudPersonalMap = latestCloud?.userPersonalSnippetsMap || userPersonalSnippetsMap;
     const activeCloudTasksMap = latestCloud?.userTasksMap || userTasksMap;
     const activeCloudBagMap = latestCloud?.userBagMap || userBagMap;
 
@@ -582,7 +723,7 @@ export default function App() {
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast('🔓 Welcome back, Admin! Personal Vault & Data synced.');
+      showToast('🔓 Welcome back, Admin!');
       return;
     }
 
@@ -605,6 +746,11 @@ export default function App() {
         [safeKey]: userPts
       };
 
+      const existingPersonalEntry = activeCloudPersonalMap[safeKey];
+      const userPersonalList = existingPersonalEntry !== undefined
+        ? (Array.isArray(existingPersonalEntry) ? existingPersonalEntry : (existingPersonalEntry.items || []))
+        : (Array.isArray(matchedUser.personalSnippets) ? matchedUser.personalSnippets : []);
+
       const existingTasksEntry = activeCloudTasksMap[safeKey];
       const userTasks = existingTasksEntry !== undefined
         ? (Array.isArray(existingTasksEntry) ? existingTasksEntry : (existingTasksEntry.items || []))
@@ -614,6 +760,11 @@ export default function App() {
       const userBag = existingBagEntry !== undefined
         ? (Array.isArray(existingBagEntry) ? existingBagEntry : (existingBagEntry.items || []))
         : (matchedUser.bagInitialized ? (matchedUser.bagItems || []) : DEFAULT_BAG);
+
+      const syncedPersonalMap = {
+        ...sanitizeListMapForFirebase(activeCloudPersonalMap),
+        [safeKey]: { updatedAt: Date.now(), items: userPersonalList }
+      };
 
       const syncedTasksMap = {
         ...sanitizeListMapForFirebase(activeCloudTasksMap),
@@ -626,13 +777,11 @@ export default function App() {
       };
 
       setUserPointsMap(syncedPointsMap);
+      setUserPersonalSnippetsMap(syncedPersonalMap);
       setUserTasksMap(syncedTasksMap);
       setUserBagMap(syncedBagMap);
       setUserRole('user');
       setCurrentUserEmail(cleanId);
-      if (activeTab === 'personalSnippets') {
-        setActiveTab('snippetHub');
-      }
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
@@ -675,6 +824,7 @@ export default function App() {
       ? latestCloud.registeredUsers
       : registeredUsers;
     const currentCloudPoints = latestCloud?.userPointsMap || userPointsMap;
+    const currentCloudPersonal = latestCloud?.userPersonalSnippetsMap || userPersonalSnippetsMap;
     const currentCloudTasks = latestCloud?.userTasksMap || userTasksMap;
     const currentCloudBag = latestCloud?.userBagMap || userBagMap;
 
@@ -702,6 +852,7 @@ export default function App() {
       email: cleanMail,
       password: regPassword,
       points: 0,
+      personalSnippets: [],
       studyTasks: DEFAULT_TASKS,
       tasksInitialized: true,
       bagItems: DEFAULT_BAG,
@@ -714,6 +865,10 @@ export default function App() {
       ...sanitizePointsMapForFirebase(currentCloudPoints),
       [safeKey]: 0
     };
+    const updatedPersonalMap = {
+      ...sanitizeListMapForFirebase(currentCloudPersonal),
+      [safeKey]: { updatedAt: Date.now(), items: [] }
+    };
     const updatedTasksMap = {
       ...sanitizeListMapForFirebase(currentCloudTasks),
       [safeKey]: { updatedAt: Date.now(), items: DEFAULT_TASKS }
@@ -725,26 +880,25 @@ export default function App() {
 
     setRegisteredUsers(updatedUsers);
     setUserPointsMap(updatedPointsMap);
+    setUserPersonalSnippetsMap(updatedPersonalMap);
     setUserTasksMap(updatedTasksMap);
     setUserBagMap(updatedBagMap);
 
     await pushToCloud({
       registeredUsers: updatedUsers,
       userPointsMap: updatedPointsMap,
+      userPersonalSnippetsMap: updatedPersonalMap,
       userTasksMap: updatedTasksMap,
       userBagMap: updatedBagMap
     });
 
     setUserRole('user');
     setCurrentUserEmail(cleanMail);
-    if (activeTab === 'personalSnippets') {
-      setActiveTab('snippetHub');
-    }
     setShowLogin(false);
     setRegEmail('');
     setRegPassword('');
     setEmailVerifiedStatus(null);
-    showToast(`✅ Registered ${cleanMail}! Personal Planner & Routine initialized.`);
+    showToast(`✅ Registered ${cleanMail}! Personal Vault & TaskFlow initialized.`);
   };
 
   const handleLogout = () => {
@@ -755,8 +909,28 @@ export default function App() {
     showToast('🔒 Logged out.');
   };
 
+  const syncUserPersonalSnippets = (nextPersonalList) => {
+    if (!activeEmail || !activeSafeKey) return;
+    const updatedPersonalMap = {
+      ...sanitizeListMapForFirebase(userPersonalSnippetsMap),
+      [activeSafeKey]: { updatedAt: Date.now(), items: nextPersonalList }
+    };
+    const updatedUsers = registeredUsers.map((u) =>
+      u.email.toLowerCase() === activeEmail
+        ? { ...u, personalSnippets: nextPersonalList }
+        : u
+    );
+    setUserPersonalSnippetsMap(updatedPersonalMap);
+    setRegisteredUsers(updatedUsers);
+    pushToCloud({ userPersonalSnippetsMap: updatedPersonalMap, registeredUsers: updatedUsers });
+  };
+
   const openAddSnippetModal = (target = 'public') => {
-    if (userRole !== 'admin') return;
+    if (target === 'public' && userRole !== 'admin') return;
+    if (target === 'personal' && !activeEmail) {
+      openAuthModal('login');
+      return;
+    }
     setSnippetModalTarget(target);
     setEditingSnippet(null);
     setSnippetTitle('');
@@ -766,7 +940,8 @@ export default function App() {
   };
 
   const openEditSnippetModal = (snippet, target = 'public') => {
-    if (userRole !== 'admin') return;
+    if (target === 'public' && userRole !== 'admin') return;
+    if (target === 'personal' && !activeEmail) return;
     setSnippetModalTarget(target);
     setEditingSnippet(snippet);
     setSnippetTitle(snippet.title);
@@ -777,18 +952,18 @@ export default function App() {
 
   const handleSaveSnippet = (e) => {
     e.preventDefault();
-    if (userRole !== 'admin') return;
     if (!snippetTitle.trim() || !snippetCode.trim()) return;
 
     if (snippetModalTarget === 'personal') {
+      if (!activeEmail) return;
       let updatedPersonal;
       if (editingSnippet) {
-        updatedPersonal = personalSnippets.map(s =>
+        updatedPersonal = currentPersonalSnippets.map(s =>
           s.id === editingSnippet.id
             ? { ...s, title: snippetTitle, category: snippetCategory, code: snippetCode }
             : s
         );
-        showToast('🔒 Personal snippet updated & synced!');
+        showToast('🔒 Personal snippet updated & synced to your ID!');
       } else {
         const newPersonal = {
           id: Date.now(),
@@ -796,15 +971,15 @@ export default function App() {
           category: snippetCategory,
           code: snippetCode
         };
-        updatedPersonal = [newPersonal, ...personalSnippets];
-        showToast('🔒 Personal snippet added & synced to Admin cloud!');
+        updatedPersonal = [newPersonal, ...currentPersonalSnippets];
+        showToast(`🔒 Personal snippet saved to ${activeEmail}!`);
       }
-      setPersonalSnippets(updatedPersonal);
-      pushToCloud({ personalSnippets: updatedPersonal });
+      syncUserPersonalSnippets(updatedPersonal);
       setShowSnippetModal(false);
       return;
     }
 
+    if (userRole !== 'admin') return;
     let updatedPublic;
     if (editingSnippet) {
       updatedPublic = snippets.map(s => 
@@ -829,14 +1004,14 @@ export default function App() {
   };
 
   const handleDeleteSnippet = (id, target = 'public') => {
-    if (userRole !== 'admin') return;
     if (target === 'personal') {
-      const updatedPersonal = personalSnippets.filter(s => s.id !== id);
-      setPersonalSnippets(updatedPersonal);
-      pushToCloud({ personalSnippets: updatedPersonal });
-      showToast('🗑️ Personal snippet deleted.');
+      if (!activeEmail) return;
+      const updatedPersonal = currentPersonalSnippets.filter(s => s.id !== id);
+      syncUserPersonalSnippets(updatedPersonal);
+      showToast('🗑️ Personal snippet deleted from your ID.');
       return;
     }
+    if (userRole !== 'admin') return;
     const updatedPublic = snippets.filter(s => s.id !== id);
     setSnippets(updatedPublic);
     pushToCloud({ snippets: updatedPublic });
@@ -1241,17 +1416,50 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     pushToCloud({ userTasksMap: updatedTasksMap, registeredUsers: updatedUsers });
   };
 
-  const handleAddTask = (e) => {
+  const handleAddTask = async (e) => {
     e.preventDefault();
     if (!newTaskText.trim()) return;
     if (!activeEmail) {
       openAuthModal('login');
       return;
     }
-    const updated = [...currentStudyTasks, { id: Date.now(), text: newTaskText.trim(), done: false }];
+
+    if (taskHasDeadline && !taskDeadlineDateTime) {
+      showToast('⚠️ Please select a deadline date and time.');
+      return;
+    }
+
+    let reminderMins = 0;
+    if (taskHasDeadline && taskDeadlineType === 'reminder') {
+      if (taskReminderPreset === 'custom') {
+        const val = Math.max(1, Number(customReminderValue) || 15);
+        reminderMins = customReminderUnit === 'hours' ? val * 60 : val;
+      } else {
+        reminderMins = Number(taskReminderPreset) || 60;
+      }
+      await requestBrowserNotificationPermission();
+    }
+
+    const newTaskObj = {
+      id: Date.now(),
+      text: newTaskText.trim(),
+      done: false,
+      hasDeadline: taskHasDeadline,
+      deadlineType: taskHasDeadline ? taskDeadlineType : 'none',
+      deadline: taskHasDeadline ? taskDeadlineDateTime : null,
+      reminderMinutes: taskHasDeadline && taskDeadlineType === 'reminder' ? reminderMins : null,
+      reminderSent: false
+    };
+
+    const updated = [newTaskObj, ...currentStudyTasks];
     syncUserTasks(updated);
     setNewTaskText('');
-    showToast(`✅ Goal saved & synced to ${activeEmail}!`);
+    setTaskDeadlineDateTime('');
+    showToast(
+      taskHasDeadline && taskDeadlineType === 'reminder'
+        ? `⏰ Task & Reminder (${formatLeadTime(reminderMins)}) synced!`
+        : `✅ Task saved & synced to ${activeEmail}!`
+    );
   };
 
   const toggleStudyTask = (id) => {
@@ -1264,7 +1472,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     if (!activeEmail) return;
     const updated = currentStudyTasks.filter(t => t.id !== id);
     syncUserTasks(updated);
-    showToast('🗑️ Goal deleted & synced to your ID!');
+    showToast('🗑️ Task deleted & synced to your ID!');
   };
 
   const syncUserBag = (nextBag) => {
@@ -1347,7 +1555,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     (s.category && s.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const filteredPersonalSnippets = personalSnippets.filter(s => 
+  const filteredPersonalSnippets = currentPersonalSnippets.filter(s => 
     s.title.toLowerCase().includes(personalSearchQuery.toLowerCase()) ||
     s.code.toLowerCase().includes(personalSearchQuery.toLowerCase()) ||
     (s.category && s.category.toLowerCase().includes(personalSearchQuery.toLowerCase()))
@@ -1361,10 +1569,14 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
   };
 
   const renderSnippetCards = (list, targetType = 'public') => {
+    const canManage = targetType === 'personal' ? Boolean(activeEmail) : userRole === 'admin';
+
     if (list.length === 0) {
       return (
         <div className="bg-[#12121a] p-8 rounded-2xl border border-white/10 text-center text-gray-400 text-sm">
-          No snippets found.
+          {targetType === 'personal'
+            ? 'Your Personal Snippet Vault is empty. Click "+ Add My Snippet" above to save your private code, links, or notes!'
+            : 'No public snippets found.'}
         </div>
       );
     }
@@ -1439,7 +1651,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                       </>
                     )}
                   </button>
-                  {userRole === 'admin' && (
+                  {canManage && (
                     <>
                       <button 
                         onClick={() => openEditSnippetModal(snippet, targetType)}
@@ -1555,27 +1767,26 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
         );
 
       case 'personalSnippets':
-        if (userRole !== 'admin') return null;
         return (
           <div className="p-4 md:p-8 animate-fade-up">
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
               <div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent flex items-center gap-2">
-                    <FolderLock className="w-7 h-7 text-amber-400" /> Personal Snippets Vault
+                    <FolderLock className="w-7 h-7 text-amber-400" /> My Personal Snippets
                   </h1>
-                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
-                    Admin Only • Private Cloud Sync
+                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                    Private to {activeEmail}
                   </span>
                   <button
                     onClick={() => fetchFromCloud(true)}
                     className="text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 border bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
                   >
-                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} /> Sync Vault
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} /> Sync My Vault
                   </button>
                 </div>
                 <p className="text-gray-400 text-sm mt-1">
-                  Visible only when logged in as Admin. Syncs automatically across any device where Admin signs in.
+                  Your private vault of snippets, links, and notes—visible only when logged into your account.
                 </p>
               </div>
 
@@ -1586,7 +1797,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                     type="text"
                     value={personalSearchQuery}
                     onChange={(e) => setPersonalSearchQuery(e.target.value)}
-                    placeholder="Search personal vault..."
+                    placeholder="Search my snippets..."
                     className="w-full bg-[#12121a] border border-amber-500/30 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
@@ -1594,7 +1805,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   onClick={() => openAddSnippetModal('personal')}
                   className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-extrabold shrink-0 transition-all shadow-lg shadow-amber-500/20"
                 >
-                  <Plus className="w-4 h-4" /> Add Personal Snippet
+                  <Plus className="w-4 h-4" /> Add My Snippet
                 </button>
               </div>
             </div>
@@ -1887,51 +2098,269 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       case 'studyPlanner':
         return (
           <div className="p-4 md:p-8 max-w-3xl animate-fade-up">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold mb-1">Study Planner</h1>
+                <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent flex items-center gap-2">
+                  <CheckSquare className="w-7 h-7 text-emerald-400" /> TaskFlow To-Do
+                </h1>
                 <p className="text-gray-400 text-sm">
-                  Synced exclusively to your ID: <span className="text-emerald-400 font-semibold">{activeEmail}</span>
+                  Personal To-Do & Smart Deadline Manager synced to <span className="text-emerald-400 font-semibold">{activeEmail}</span>
                 </p>
               </div>
-              <button
-                onClick={() => fetchFromCloud(true)}
-                className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 w-fit"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} /> Sync My Goals
-              </button>
+              <div className="flex items-center gap-2">
+                {notifPermission !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={requestBrowserNotificationPermission}
+                    className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                  >
+                    <Bell className="w-3.5 h-3.5" /> Enable Push Alerts
+                  </button>
+                )}
+                <button
+                  onClick={() => fetchFromCloud(true)}
+                  className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} /> Sync Tasks
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleAddTask} className="flex gap-2 mb-6">
-              <input
-                type="text"
-                value={newTaskText}
-                onChange={(e) => setNewTaskText(e.target.value)}
-                placeholder="Add a new study goal for your ID..."
-                className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
-              />
-              <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg text-sm font-bold shrink-0">
-                Add Goal
+            <form onSubmit={handleAddTask} className="bg-[#12121a] p-5 rounded-2xl border border-white/10 mb-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                  To-Do Task Title
+                </label>
+                <input
+                  type="text"
+                  value={newTaskText}
+                  onChange={(e) => setNewTaskText(e.target.value)}
+                  placeholder="What do you need to get done?"
+                  className="w-full bg-[#050505] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                  1. Choose Task Mode
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTaskHasDeadline(false)}
+                    className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                      !taskHasDeadline
+                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                        : 'bg-[#050505] border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <CheckSquare className="w-4 h-4" /> Without Deadline
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskHasDeadline(true)}
+                    className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
+                      taskHasDeadline
+                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                        : 'bg-[#050505] border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" /> With Deadline
+                  </button>
+                </div>
+              </div>
+
+              {taskHasDeadline && (
+                <div className="p-4 rounded-xl bg-[#050505] border border-indigo-500/25 space-y-4 animate-fade-up">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                      2. Select Deadline Type
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setTaskDeadlineType('simple')}
+                        className={`p-3 rounded-xl text-left border transition-all ${
+                          taskDeadlineType === 'simple'
+                            ? 'bg-indigo-600/15 border-indigo-500 text-white'
+                            : 'bg-[#12121a] border-white/10 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5 text-indigo-300">
+                          <Calendar className="w-4 h-4" /> Simple Deadline
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Displays the target date and time on your task card.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTaskDeadlineType('reminder')}
+                        className={`p-3 rounded-xl text-left border transition-all ${
+                          taskDeadlineType === 'reminder'
+                            ? 'bg-amber-500/15 border-amber-500 text-white'
+                            : 'bg-[#12121a] border-white/10 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5 text-amber-300">
+                          <Bell className="w-4 h-4" /> Reminder Deadline
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Sends professional web & push alerts when the deadline is near.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">
+                      Target Deadline Date & Time
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={taskDeadlineDateTime}
+                      onChange={(e) => setTaskDeadlineDateTime(e.target.value)}
+                      className="w-full bg-[#12121a] border border-white/15 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      required={taskHasDeadline}
+                    />
+                  </div>
+
+                  {taskDeadlineType === 'reminder' && (
+                    <div className="space-y-3 pt-1">
+                      <label className="block text-xs font-bold text-amber-300 uppercase">
+                        Set Reminder Alert Before Deadline
+                      </label>
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                        {REMINDER_PRESETS.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setTaskReminderPreset(preset.minutes)}
+                            className={`py-2 px-2.5 rounded-lg text-xs font-bold border transition-all ${
+                              taskReminderPreset === preset.minutes
+                                ? 'bg-amber-500 text-black border-amber-400 shadow'
+                                : 'bg-[#12121a] text-gray-300 border-white/10 hover:border-amber-500/40'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {taskReminderPreset === 'custom' && (
+                        <div className="flex items-center gap-2 pt-2">
+                          <input
+                            type="number"
+                            min={1}
+                            max={10000}
+                            value={customReminderValue}
+                            onChange={(e) => setCustomReminderValue(e.target.value)}
+                            className="w-28 bg-[#12121a] border border-amber-500/40 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                            placeholder="e.g. 45"
+                          />
+                          <select
+                            value={customReminderUnit}
+                            onChange={(e) => setCustomReminderUnit(e.target.value)}
+                            className="bg-[#12121a] border border-amber-500/40 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                          >
+                            <option value="minutes">Minutes Before</option>
+                            <option value="hours">Hours Before</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+              >
+                <Plus className="w-4 h-4" /> Add To-Do Task
               </button>
             </form>
 
             <div className="space-y-3">
               {currentStudyTasks.length === 0 ? (
                 <div className="bg-[#12121a] p-6 rounded-xl border border-white/10 text-center text-gray-400 text-sm">
-                  No study goals in your account yet. Add your first goal above!
+                  No tasks in your TaskFlow To-Do list yet. Add a task above!
                 </div>
               ) : (
-                currentStudyTasks.map(task => (
-                  <div key={task.id} className="bg-[#12121a] p-4 rounded-xl border border-white/10 flex items-center justify-between">
-                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => toggleStudyTask(task.id)}>
-                      <input type="checkbox" checked={Boolean(task.done)} readOnly className="w-4 h-4 accent-emerald-500" />
-                      <span className={task.done ? 'line-through text-gray-500' : 'text-white'}>{task.text}</span>
+                currentStudyTasks.map((task) => {
+                  const isOverdue =
+                    !task.done &&
+                    task.hasDeadline &&
+                    task.deadline &&
+                    new Date(task.deadline).getTime() < Date.now();
+
+                  return (
+                    <div
+                      key={task.id}
+                      className={`bg-[#12121a] p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                        isOverdue ? 'border-red-500/40' : 'border-white/10'
+                      }`}
+                    >
+                      <div
+                        className="flex items-start gap-3 cursor-pointer flex-1"
+                        onClick={() => toggleStudyTask(task.id)}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(task.done)}
+                          readOnly
+                          className="w-4 h-4 mt-1 accent-emerald-500 shrink-0"
+                        />
+                        <div className="space-y-1.5">
+                          <span className={`block text-sm font-medium ${task.done ? 'line-through text-gray-500' : 'text-white'}`}>
+                            {task.text}
+                          </span>
+                          {task.hasDeadline && task.deadline && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 border ${
+                                  task.done
+                                    ? 'bg-gray-500/10 text-gray-400 border-white/10'
+                                    : isOverdue
+                                      ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                      : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                                }`}
+                              >
+                                <Calendar className="w-3 h-3" />
+                                Due: {new Date(task.deadline).toLocaleString()}
+                                {isOverdue && !task.done ? ' (Overdue)' : ''}
+                              </span>
+
+                              {task.deadlineType === 'reminder' && (
+                                <span
+                                  className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 border ${
+                                    task.reminderSent
+                                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                  }`}
+                                >
+                                  <Bell className="w-3 h-3" />
+                                  {task.reminderSent
+                                    ? 'Reminder Sent'
+                                    : `Alert: ${formatLeadTime(task.reminderMinutes)}`}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteStudyTask(task.id)}
+                        className="text-gray-500 hover:text-red-400 p-1.5 self-end sm:self-center"
+                        title="Delete Task"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <button onClick={() => deleteStudyTask(task.id)} className="text-gray-500 hover:text-red-400 p-1">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -2121,6 +2550,46 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
         .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       `}</style>
 
+      {activeAlerts.length > 0 && (
+        <div className="fixed top-4 right-4 z-[250] space-y-3 max-w-sm w-full px-4 sm:px-0">
+          {activeAlerts.map((alertItem) => (
+            <div
+              key={alertItem.id}
+              className="bg-[#0e0e18] border-2 border-amber-500 rounded-2xl p-4 shadow-2xl shadow-amber-500/20 animate-pop-in"
+            >
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex items-center gap-2 text-amber-400 font-extrabold text-xs uppercase tracking-wider">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {alertItem.title}
+                </div>
+                <button
+                  onClick={() =>
+                    setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
+                  }
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-white font-bold text-sm mt-2">{alertItem.taskText}</p>
+              <p className="text-xs text-gray-300 mt-1">
+                Deadline: <span className="text-amber-300 font-semibold">{alertItem.deadlineText}</span>
+              </p>
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() =>
+                    setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
+                  }
+                  className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold px-3.5 py-1.5 rounded-lg"
+                >
+                  Acknowledge
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {toast && (
         <div className="fixed bottom-5 right-5 z-[200] bg-indigo-600 text-white px-4 py-3 rounded-xl shadow-2xl border border-indigo-400/40 flex items-center gap-2 text-sm font-semibold animate-pop-in">
           <Zap className="w-4 h-4 text-yellow-300" /> {toast}
@@ -2165,34 +2634,23 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
             <Play className="w-5 h-5" /> Arcade Lounge
           </button>
 
-          {userRole === 'admin' && (
-            <>
-              <div className="text-xs font-bold text-amber-500/80 uppercase mb-2 mt-6 px-3">Admin Private Vault</div>
-              <button
-                onClick={() => handleNavigation('personalSnippets')}
-                className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${
-                  activeTab === 'personalSnippets'
-                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                    : 'text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <FolderLock className="w-5 h-5" /> Personal Snippets
-                </div>
-                <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
-                  {personalSnippets.length}
-                </span>
-              </button>
-            </>
-          )}
-
           <div className="text-xs font-bold text-gray-600 uppercase mb-4 mt-8 px-3">Member Access</div>
+          <button onClick={() => handleNavigation('personalSnippets')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'personalSnippets' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+            <div className="flex items-center gap-3"><FolderLock className="w-5 h-5 text-amber-400" /> Personal Snippets</div>
+            {userRole === 'guest' ? (
+              <Lock className="w-4 h-4 text-gray-600" />
+            ) : (
+              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                {currentPersonalSnippets.length}
+              </span>
+            )}
+          </button>
           <button onClick={() => handleNavigation('auraBot')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'auraBot' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><Sparkles className="w-5 h-5" /> Aura AI Bot</div>
             {userRole === 'guest' && <Lock className="w-4 h-4 text-gray-600" />}
           </button>
           <button onClick={() => handleNavigation('studyPlanner')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'studyPlanner' ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
-            <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> Study Planner</div>
+            <div className="flex items-center gap-3"><CheckSquare className="w-5 h-5" /> TaskFlow To-Do</div>
             {userRole === 'guest' ? (
               <Lock className="w-4 h-4 text-gray-600" />
             ) : (
@@ -2278,7 +2736,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
         {renderContent()}
       </div>
 
-      {showSnippetModal && userRole === 'admin' && (
+      {showSnippetModal && (snippetModalTarget === 'personal' ? Boolean(activeEmail) : userRole === 'admin') && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0a0a0f] border border-indigo-500/30 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative animate-pop-in">
             <button onClick={() => setShowSnippetModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
@@ -2288,7 +2746,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               {snippetModalTarget === 'personal' ? (
                 <>
                   <FolderLock className="w-5 h-5 text-amber-400" />
-                  {editingSnippet ? 'Edit Personal Snippet' : 'Add Personal Snippet'}
+                  {editingSnippet ? 'Edit My Personal Snippet' : 'Add Personal Snippet'}
                 </>
               ) : (
                 <>
@@ -2385,7 +2843,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               </h2>
               <p className="text-gray-400 text-xs mt-1">
                 {authMode === 'login'
-                  ? 'Sign in to load the MuMu Points, Study Goals & Routine synced to your Mail ID'
+                  ? 'Sign in to load your Personal Snippets, TaskFlow To-Do & MuMu Points'
                   : 'Register with a real Google Gmail ID (Starts with 0 MuMu Points)'}
               </p>
             </div>
