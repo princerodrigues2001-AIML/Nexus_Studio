@@ -5,7 +5,7 @@ import {
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
-  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare
+  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare, FolderLock
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -43,6 +43,10 @@ const DEFAULT_SNIPPETS = [
     category: 'JS', 
     code: 'async function fetchWithRetry(url, retries = 3) {\n  for (let i = 0; i < retries; i++) {\n    try {\n      const response = await fetch(url);\n      if (!response.ok) throw new Error("HTTP Error");\n      return await response.json();\n    } catch (err) {\n      if (i === retries - 1) throw err;\n      await new Promise(r => setTimeout(r, 1000));\n    }\n  }\n}' 
   }
+];
+
+const DEFAULT_PERSONAL_SNIPPETS = [
+  { id: 101, title: 'Private Admin Config Template', category: 'JS', code: 'export const ADMIN_CONFIG = {\n  syncInterval: 2500,\n  strictAuth: true\n};' }
 ];
 
 const DEFAULT_TASKS = [
@@ -224,6 +228,15 @@ export default function App() {
     }
   });
 
+  const [personalSnippets, setPersonalSnippets] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_personal_snippets');
+      return saved ? JSON.parse(saved) : DEFAULT_PERSONAL_SNIPPETS;
+    } catch {
+      return DEFAULT_PERSONAL_SNIPPETS;
+    }
+  });
+
   const [studyTasks, setStudyTasks] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_study_tasks');
@@ -242,12 +255,28 @@ export default function App() {
     }
   });
 
-  const stateRef = useRef({ snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList });
+  const stateRef = useRef({
+    snippets,
+    personalSnippets,
+    studyTasks,
+    bagItems,
+    userPointsMap,
+    registeredUsers,
+    feedbackList
+  });
   const lastLocalWriteRef = useRef(0);
 
   useEffect(() => {
-    stateRef.current = { snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList };
-  }, [snippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList]);
+    stateRef.current = {
+      snippets,
+      personalSnippets,
+      studyTasks,
+      bagItems,
+      userPointsMap,
+      registeredUsers,
+      feedbackList
+    };
+  }, [snippets, personalSnippets, studyTasks, bagItems, userPointsMap, registeredUsers, feedbackList]);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -260,7 +289,9 @@ export default function App() {
   const [emailVerifiedStatus, setEmailVerifiedStatus] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [personalSearchQuery, setPersonalSearchQuery] = useState('');
   const [showSnippetModal, setShowSnippetModal] = useState(false);
+  const [snippetModalTarget, setSnippetModalTarget] = useState('public');
   const [editingSnippet, setEditingSnippet] = useState(null);
   const [snippetTitle, setSnippetTitle] = useState('');
   const [snippetCategory, setSnippetCategory] = useState('JS');
@@ -322,6 +353,7 @@ export default function App() {
 
     const payload = {
       snippets: overrideData.snippets ?? stateRef.current.snippets,
+      personalSnippets: overrideData.personalSnippets ?? stateRef.current.personalSnippets,
       studyTasks: overrideData.studyTasks ?? stateRef.current.studyTasks,
       bagItems: overrideData.bagItems ?? stateRef.current.bagItems,
       userPointsMap: safePoints,
@@ -362,6 +394,10 @@ export default function App() {
         if (Array.isArray(data.snippets)) {
           setSnippets(data.snippets);
           localStorage.setItem('nexus_snippets', JSON.stringify(data.snippets));
+        }
+        if (Array.isArray(data.personalSnippets)) {
+          setPersonalSnippets(data.personalSnippets);
+          localStorage.setItem('nexus_personal_snippets', JSON.stringify(data.personalSnippets));
         }
         if (Array.isArray(data.studyTasks)) {
           setStudyTasks(data.studyTasks);
@@ -410,6 +446,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('nexus_feedback_list', JSON.stringify(feedbackList)), [feedbackList]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
+  useEffect(() => localStorage.setItem('nexus_personal_snippets', JSON.stringify(personalSnippets)), [personalSnippets]);
   useEffect(() => localStorage.setItem('nexus_study_tasks', JSON.stringify(studyTasks)), [studyTasks]);
   useEffect(() => localStorage.setItem('nexus_bag_items', JSON.stringify(bagItems)), [bagItems]);
 
@@ -457,6 +494,9 @@ export default function App() {
   };
 
   const handleNavigation = (tab) => {
+    if (tab === 'personalSnippets' && userRole !== 'admin') {
+      return;
+    }
     if (userRole === 'guest' && tab !== 'snippetHub' && tab !== 'arcadeLounge') {
       openAuthModal('login');
       return;
@@ -482,7 +522,7 @@ export default function App() {
       setLoginError('');
       setLoginEmail('');
       setLoginPassword('');
-      showToast('🔓 Welcome back, Admin!');
+      showToast('🔓 Welcome back, Admin! Personal Snippets unlocked.');
       return;
     }
 
@@ -508,6 +548,9 @@ export default function App() {
       setUserPointsMap(syncedMap);
       setUserRole('user');
       setCurrentUserEmail(cleanId);
+      if (activeTab === 'personalSnippets') {
+        setActiveTab('snippetHub');
+      }
       setShowLogin(false);
       setLoginError('');
       setLoginEmail('');
@@ -590,6 +633,9 @@ export default function App() {
 
     setUserRole('user');
     setCurrentUserEmail(cleanMail);
+    if (activeTab === 'personalSnippets') {
+      setActiveTab('snippetHub');
+    }
     setShowLogin(false);
     setRegEmail('');
     setRegPassword('');
@@ -605,8 +651,9 @@ export default function App() {
     showToast('🔒 Logged out.');
   };
 
-  const openAddSnippetModal = () => {
+  const openAddSnippetModal = (target = 'public') => {
     if (userRole !== 'admin') return;
+    setSnippetModalTarget(target);
     setEditingSnippet(null);
     setSnippetTitle('');
     setSnippetCategory('JS');
@@ -614,8 +661,9 @@ export default function App() {
     setShowSnippetModal(true);
   };
 
-  const openEditSnippetModal = (snippet) => {
+  const openEditSnippetModal = (snippet, target = 'public') => {
     if (userRole !== 'admin') return;
+    setSnippetModalTarget(target);
     setEditingSnippet(snippet);
     setSnippetTitle(snippet.title);
     setSnippetCategory(snippet.category || 'JS');
@@ -628,14 +676,39 @@ export default function App() {
     if (userRole !== 'admin') return;
     if (!snippetTitle.trim() || !snippetCode.trim()) return;
 
-    let updated;
+    if (snippetModalTarget === 'personal') {
+      let updatedPersonal;
+      if (editingSnippet) {
+        updatedPersonal = personalSnippets.map(s =>
+          s.id === editingSnippet.id
+            ? { ...s, title: snippetTitle, category: snippetCategory, code: snippetCode }
+            : s
+        );
+        showToast('🔒 Personal snippet updated & synced!');
+      } else {
+        const newPersonal = {
+          id: Date.now(),
+          title: snippetTitle,
+          category: snippetCategory,
+          code: snippetCode
+        };
+        updatedPersonal = [newPersonal, ...personalSnippets];
+        showToast('🔒 Personal snippet added & synced to Admin cloud!');
+      }
+      setPersonalSnippets(updatedPersonal);
+      pushToCloud({ personalSnippets: updatedPersonal });
+      setShowSnippetModal(false);
+      return;
+    }
+
+    let updatedPublic;
     if (editingSnippet) {
-      updated = snippets.map(s => 
+      updatedPublic = snippets.map(s => 
         s.id === editingSnippet.id 
           ? { ...s, title: snippetTitle, category: snippetCategory, code: snippetCode }
           : s
       );
-      showToast('✨ Snippet updated & synced by Admin!');
+      showToast('✨ Public snippet updated & synced!');
     } else {
       const newSnippet = {
         id: Date.now(),
@@ -643,20 +716,27 @@ export default function App() {
         category: snippetCategory,
         code: snippetCode
       };
-      updated = [newSnippet, ...snippets];
-      showToast('🚀 New snippet created & synced by Admin!');
+      updatedPublic = [newSnippet, ...snippets];
+      showToast('🚀 Public snippet created & synced!');
     }
-    setSnippets(updated);
-    pushToCloud({ snippets: updated });
+    setSnippets(updatedPublic);
+    pushToCloud({ snippets: updatedPublic });
     setShowSnippetModal(false);
   };
 
-  const handleDeleteSnippet = (id) => {
+  const handleDeleteSnippet = (id, target = 'public') => {
     if (userRole !== 'admin') return;
-    const updated = snippets.filter(s => s.id !== id);
-    setSnippets(updated);
-    pushToCloud({ snippets: updated });
-    showToast('🗑️ Snippet deleted by Admin.');
+    if (target === 'personal') {
+      const updatedPersonal = personalSnippets.filter(s => s.id !== id);
+      setPersonalSnippets(updatedPersonal);
+      pushToCloud({ personalSnippets: updatedPersonal });
+      showToast('🗑️ Personal snippet deleted.');
+      return;
+    }
+    const updatedPublic = snippets.filter(s => s.id !== id);
+    setSnippets(updatedPublic);
+    pushToCloud({ snippets: updatedPublic });
+    showToast('🗑️ Public snippet deleted.');
   };
 
   const handleCopyCode = (id, fullCodeText) => {
@@ -1123,6 +1203,127 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     (s.category && s.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
+  const filteredPersonalSnippets = personalSnippets.filter(s => 
+    s.title.toLowerCase().includes(personalSearchQuery.toLowerCase()) ||
+    s.code.toLowerCase().includes(personalSearchQuery.toLowerCase()) ||
+    (s.category && s.category.toLowerCase().includes(personalSearchQuery.toLowerCase()))
+  );
+
+  const renderSnippetCards = (list, targetType = 'public') => {
+    if (list.length === 0) {
+      return (
+        <div className="bg-[#12121a] p-8 rounded-2xl border border-white/10 text-center text-gray-400 text-sm">
+          No snippets found.
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+        {list.map((snippet, index) => {
+          const codeLines = (snippet.code || '').split('\n');
+          const isLongSnippet = codeLines.length > 6 || (snippet.code || '').length > 220;
+          const expandKey = `${targetType}-${snippet.id}`;
+          const isExpanded = Boolean(expandedSnippets[expandKey]);
+
+          const displayedCode =
+            isLongSnippet && !isExpanded
+              ? codeLines.slice(0, 6).join('\n').slice(0, 220) + '...'
+              : snippet.code;
+
+          return (
+            <div 
+              key={snippet.id} 
+              style={{ animationDelay: `${index * 50}ms` }}
+              className={`animate-fade-up bg-[#12121a] p-5 rounded-xl border transition-all duration-300 flex flex-col hover:-translate-y-1 hover:shadow-xl ${
+                targetType === 'personal'
+                  ? 'border-amber-500/20 hover:border-amber-500/60 hover:shadow-amber-500/10'
+                  : 'border-white/10 hover:border-indigo-500/60 hover:shadow-indigo-500/10'
+              }`}
+            >
+              <div className="flex justify-between items-center mb-3">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded border ${
+                    targetType === 'personal'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/20'
+                  }`}>
+                    {snippet.category || 'CODE'}
+                  </span>
+                  {targetType === 'personal' && (
+                    <span className="text-[10px] font-semibold text-amber-400/80 flex items-center gap-0.5">
+                      <Lock className="w-3 h-3" /> Private
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => handleCopyCode(expandKey, snippet.code)}
+                    className="px-2 py-1 text-gray-300 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all flex items-center gap-1 text-xs"
+                    title="Copy Full Code"
+                  >
+                    {copiedId === expandKey ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400 font-semibold">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                  {userRole === 'admin' && (
+                    <>
+                      <button 
+                        onClick={() => openEditSnippetModal(snippet, targetType)}
+                        className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 transition-all"
+                        title="Edit Snippet"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteSnippet(snippet.id, targetType)}
+                        className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 transition-all"
+                        title="Delete Snippet"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <h3 className="font-bold text-white text-lg mb-3">{snippet.title}</h3>
+              <div className="bg-[#050505] rounded-lg border border-white/5 overflow-hidden flex flex-col">
+                <pre className="p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                  {displayedCode}
+                </pre>
+                {isLongSnippet && (
+                  <button
+                    type="button"
+                    onClick={() => toggleSnippetExpand(expandKey)}
+                    className="w-full py-2 px-4 bg-indigo-500/10 hover:bg-indigo-500/20 border-t border-white/5 text-indigo-400 text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                  >
+                    {isExpanded ? (
+                      <>
+                        Show less <ChevronUp className="w-3.5 h-3.5" />
+                      </>
+                    ) : (
+                      <>
+                        Read more... <ChevronDown className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'snippetHub':
@@ -1169,107 +1370,71 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search snippets..."
+                    placeholder="Search public snippets..."
                     className="w-full bg-[#12121a] border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
                 {userRole === 'admin' && (
                   <button 
-                    onClick={openAddSnippetModal}
+                    onClick={() => openAddSnippetModal('public')}
                     className="bg-emerald-600 hover:bg-emerald-500 hover:scale-105 active:scale-95 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shrink-0 transition-all shadow-lg shadow-emerald-600/20"
                   >
-                    <Plus className="w-4 h-4" /> Add Snippet
+                    <Plus className="w-4 h-4" /> Add Public Snippet
                   </button>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
-              {filteredSnippets.map((snippet, index) => {
-                const codeLines = (snippet.code || '').split('\n');
-                const isLongSnippet = codeLines.length > 6 || (snippet.code || '').length > 220;
-                const isExpanded = Boolean(expandedSnippets[snippet.id]);
+            {renderSnippetCards(filteredSnippets, 'public')}
+          </div>
+        );
 
-                const displayedCode =
-                  isLongSnippet && !isExpanded
-                    ? codeLines.slice(0, 6).join('\n').slice(0, 220) + '...'
-                    : snippet.code;
-
-                return (
-                  <div 
-                    key={snippet.id} 
-                    style={{ animationDelay: `${index * 50}ms` }}
-                    className="animate-fade-up bg-[#12121a] p-5 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col"
+      case 'personalSnippets':
+        if (userRole !== 'admin') return null;
+        return (
+          <div className="p-4 md:p-8 animate-fade-up">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
+              <div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent flex items-center gap-2">
+                    <FolderLock className="w-7 h-7 text-amber-400" /> Personal Snippets Vault
+                  </h1>
+                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
+                    Admin Only • Private Cloud Sync
+                  </span>
+                  <button
+                    onClick={() => fetchFromCloud(true)}
+                    className="text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 border bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
                   >
-                    <div className="flex justify-between items-center mb-3">
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/20">
-                        {snippet.category || 'CODE'}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button 
-                          onClick={() => handleCopyCode(snippet.id, snippet.code)}
-                          className="px-2 py-1 text-gray-300 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all flex items-center gap-1 text-xs"
-                          title="Copy Full Code"
-                        >
-                          {copiedId === snippet.id ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-400 font-semibold">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" />
-                              <span>Copy</span>
-                            </>
-                          )}
-                        </button>
-                        {userRole === 'admin' && (
-                          <>
-                            <button 
-                              onClick={() => openEditSnippetModal(snippet)}
-                              className="p-1.5 text-gray-400 hover:text-indigo-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                              title="Edit Snippet (Admin Only)"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteSnippet(snippet.id)}
-                              className="p-1.5 text-gray-400 hover:text-red-400 rounded bg-white/5 hover:bg-white/10 transition-all"
-                              title="Delete Snippet (Admin Only)"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <h3 className="font-bold text-white text-lg mb-3">{snippet.title}</h3>
-                    <div className="bg-[#050505] rounded-lg border border-white/5 overflow-hidden flex flex-col">
-                      <pre className="p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                        {displayedCode}
-                      </pre>
-                      {isLongSnippet && (
-                        <button
-                          type="button"
-                          onClick={() => toggleSnippetExpand(snippet.id)}
-                          className="w-full py-2 px-4 bg-indigo-500/10 hover:bg-indigo-500/20 border-t border-white/5 text-indigo-400 text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                        >
-                          {isExpanded ? (
-                            <>
-                              Show less <ChevronUp className="w-3.5 h-3.5" />
-                            </>
-                          ) : (
-                            <>
-                              Read more... <ChevronDown className="w-3.5 h-3.5" />
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} /> Sync Vault
+                  </button>
+                </div>
+                <p className="text-gray-400 text-sm mt-1">
+                  Visible only when logged in as Admin. Syncs automatically across any device where Admin signs in.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={personalSearchQuery}
+                    onChange={(e) => setPersonalSearchQuery(e.target.value)}
+                    placeholder="Search personal vault..."
+                    className="w-full bg-[#12121a] border border-amber-500/30 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <button 
+                  onClick={() => openAddSnippetModal('personal')}
+                  className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-extrabold shrink-0 transition-all shadow-lg shadow-amber-500/20"
+                >
+                  <Plus className="w-4 h-4" /> Add Personal Snippet
+                </button>
+              </div>
             </div>
+
+            {renderSnippetCards(filteredPersonalSnippets, 'personal')}
           </div>
         );
 
@@ -1795,6 +1960,27 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
             <Play className="w-5 h-5" /> Arcade Lounge
           </button>
 
+          {userRole === 'admin' && (
+            <>
+              <div className="text-xs font-bold text-amber-500/80 uppercase mb-2 mt-6 px-3">Admin Private Vault</div>
+              <button
+                onClick={() => handleNavigation('personalSnippets')}
+                className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${
+                  activeTab === 'personalSnippets'
+                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                    : 'text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <FolderLock className="w-5 h-5" /> Personal Snippets
+                </div>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                  {personalSnippets.length}
+                </span>
+              </button>
+            </>
+          )}
+
           <div className="text-xs font-bold text-gray-600 uppercase mb-4 mt-8 px-3">Member Access</div>
           <button onClick={() => handleNavigation('auraBot')} className={`w-full flex justify-between items-center px-4 py-3 rounded-lg text-left transition-all text-sm font-medium ${activeTab === 'auraBot' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             <div className="flex items-center gap-3"><Sparkles className="w-5 h-5" /> Aura AI Bot</div>
@@ -1882,8 +2068,17 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               <X className="w-6 h-6" />
             </button>
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-400" />
-              {editingSnippet ? 'Edit Snippet (Admin)' : 'Add New Snippet (Admin)'}
+              {snippetModalTarget === 'personal' ? (
+                <>
+                  <FolderLock className="w-5 h-5 text-amber-400" />
+                  {editingSnippet ? 'Edit Personal Snippet' : 'Add Personal Snippet'}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                  {editingSnippet ? 'Edit Public Snippet' : 'Add Public Snippet'}
+                </>
+              )}
             </h2>
             <form onSubmit={handleSaveSnippet} className="space-y-4">
               <div>
@@ -1926,7 +2121,14 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                 <button type="button" onClick={() => setShowSnippetModal(false)} className="px-4 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5">
                   Cancel
                 </button>
-                <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm font-bold">
+                <button
+                  type="submit"
+                  className={`px-5 py-2 rounded-lg text-sm font-bold ${
+                    snippetModalTarget === 'personal'
+                      ? 'bg-amber-500 hover:bg-amber-400 text-black'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
                   {editingSnippet ? 'Save Changes' : 'Create Snippet'}
                 </button>
               </div>
