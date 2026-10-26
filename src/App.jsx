@@ -6,7 +6,7 @@ import {
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
   UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, 
-  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle, Download
+  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle, Download, Globe
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -458,7 +458,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. How can I help you today?" 
+      text: "Hello! I am Aura, your AI assistant with live web search and deep task execution. I am an AI, so I can make mistakes—please review code and important information carefully. What task or search can I help you with today?" 
     }
   ]);
   const chatEndRef = useRef(null);
@@ -1135,6 +1135,16 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const handleClearChat = () => {
+    setChatHistory([
+      {
+        sender: 'aura',
+        text: "Hello! I am Aura, your AI assistant with live web search and deep task execution. I am an AI, so I can make mistakes—please review code and important information carefully. What task or search can I help you with today?"
+      }
+    ]);
+    showToast('✨ Started a fresh chat session!');
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const userMessage = chatInput.trim();
@@ -1143,51 +1153,96 @@ export default function App() {
     const currentImage = selectedImage;
     const updatedHistory = [
       ...chatHistory, 
-      { sender: 'user', text: userMessage || 'Analyze this attached image.', image: currentImage }
+      { sender: 'user', text: userMessage || 'Analyze this attached image thoroughly and solve any tasks shown.', image: currentImage }
     ];
     setChatHistory(updatedHistory);
     setChatInput('');
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const systemPrompt = `You are Aura, a helpful AI coding assistant and study companion inside Nexus Studio.
-Provide clear answers and put code examples inside markdown code blocks (\`\`\`language ... \`\`\`).`;
+    const systemPrompt = `You are Aura, an elite, comprehensive AI assistant, researcher, and software architect inside Nexus Studio.
+When the user searches for information or gives you any task, follow these rules:
+1. Deliver complete, thorough, high-value results—never give lazy, short, or vague summaries. If asked to write an essay, report, plan, script, or code, write the entire deliverable in full detail.
+2. Structure your response using clear Markdown headings (###), bullet points, numbered steps, and **bold** key terms so it is easy to scan and read.
+3. For coding or technical tasks, write complete, production-ready, bug-free code inside fenced markdown code blocks (\`\`\`language ... \`\`\`) and explain how it works step by step.
+4. For math, science, or logic tasks, work through the solution step-by-step and verify your final answer.
+5. For search or factual queries, provide up-to-date, concrete facts, figures, and specifics.`;
 
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
-      const geminiContents = updatedHistory.slice(-8).map((msg, idx) => {
-        const textPrefix = idx === 0 && msg.sender === 'user' ? `${systemPrompt}\n\nUser: ` : '';
-        const parts = [{ text: `${textPrefix}${msg.text}` }];
+      const rawSlice = updatedHistory.slice(-12);
+      const firstUserIdx = rawSlice.findIndex((m) => m.sender === 'user');
+      const validSlice = firstUserIdx !== -1 ? rawSlice.slice(firstUserIdx) : [];
+
+      const geminiContents = [];
+      validSlice.forEach((msg) => {
+        const role = msg.sender === 'user' ? 'user' : 'model';
+        const parts = [{ text: msg.text || ' ' }];
         if (msg.image) {
           const matches = msg.image.match(/^data:(.+);base64,(.+)$/);
           if (matches) {
             parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
           }
         }
-        return {
-          role: msg.sender === 'user' ? 'user' : 'model',
-          parts
-        };
+        if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === role) {
+          geminiContents[geminiContents.length - 1].parts.push(...parts);
+        } else {
+          geminiContents.push({ role, parts });
+        }
       });
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-      for (const modelName of modelsToTry) {
+      const attemptConfigs = [
+        { model: 'gemini-2.5-flash', useSearch: !currentImage },
+        { model: 'gemini-2.5-pro', useSearch: false },
+        { model: 'gemini-2.5-flash', useSearch: false },
+        { model: 'gemini-2.0-flash', useSearch: false }
+      ];
+
+      for (const cfg of attemptConfigs) {
         try {
+          const requestBody = {
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: geminiContents,
+            generationConfig: {
+              temperature: 0.35,
+              topP: 0.95,
+              maxOutputTokens: 8192
+            }
+          };
+
+          if (cfg.useSearch) {
+            requestBody.tools = [{ google_search: {} }];
+          }
+
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${GEMINI_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: geminiContents,
-                generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
-              })
+              body: JSON.stringify(requestBody)
             }
           );
+
           if (response.ok) {
             const data = await response.json();
-            const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            const candidate = data?.candidates?.[0];
+            const parts = candidate?.content?.parts || [];
+            const aiReply = parts.map((p) => p.text || '').join('\n').trim();
+
+            const rawChunks = candidate?.groundingMetadata?.groundingChunks || [];
+            const sources = [];
+            rawChunks.forEach((chunk) => {
+              if (chunk?.web?.uri && chunk?.web?.title) {
+                if (!sources.some((s) => s.uri === chunk.web.uri)) {
+                  sources.push({ title: chunk.web.title, uri: chunk.web.uri });
+                }
+              }
+            });
+
             if (aiReply) {
-              setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
+              setChatHistory([
+                ...updatedHistory,
+                { sender: 'aura', text: aiReply, sources: sources.slice(0, 5) }
+              ]);
               setIsAiLoading(false);
               return;
             }
@@ -1196,26 +1251,29 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       }
     }
 
-    const fallbackModels = ['openai', 'openai-large', 'mistral'];
+    const fallbackModels = ['searchgpt', 'openai-large', 'openai', 'deepseek'];
     for (const fbModel of fallbackModels) {
       try {
         const openAiMessages = [
           { role: 'system', content: systemPrompt },
-          ...updatedHistory.slice(-6).map((msg) => {
-            if (msg.image) {
+          ...updatedHistory
+            .filter((_, idx) => idx > 0)
+            .slice(-8)
+            .map((msg) => {
+              if (msg.image) {
+                return {
+                  role: msg.sender === 'user' ? 'user' : 'assistant',
+                  content: [
+                    { type: 'text', text: msg.text || 'Analyze this image thoroughly.' },
+                    { type: 'image_url', image_url: { url: msg.image } }
+                  ]
+                };
+              }
               return {
                 role: msg.sender === 'user' ? 'user' : 'assistant',
-                content: [
-                  { type: 'text', text: msg.text || 'Analyze this image.' },
-                  { type: 'image_url', image_url: { url: msg.image } }
-                ]
+                content: msg.text
               };
-            }
-            return {
-              role: msg.sender === 'user' ? 'user' : 'assistant',
-              content: msg.text
-            };
-          })
+            })
         ];
 
         const liveRes = await fetch('https://text.pollinations.ai/openai', {
@@ -1223,7 +1281,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: fbModel,
-            temperature: 0.4,
+            temperature: 0.35,
             messages: openAiMessages
           })
         });
@@ -1240,21 +1298,6 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       } catch {}
     }
 
-    try {
-      const promptQuery = encodeURIComponent(
-        `You are Aura, a helpful AI coding assistant. Answer clearly: ${userMessage}`
-      );
-      const getRes = await fetch(`https://text.pollinations.ai/${promptQuery}`);
-      if (getRes.ok) {
-        const textReply = await getRes.text();
-        if (textReply && textReply.trim()) {
-          setChatHistory([...updatedHistory, { sender: 'aura', text: textReply.trim() }]);
-          setIsAiLoading(false);
-          return;
-        }
-      }
-    } catch {}
-
     setChatHistory([
       ...updatedHistory,
       {
@@ -1265,54 +1308,151 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     setIsAiLoading(false);
   };
 
-  const renderFormattedAiText = (rawText, msgIndex) => {
+  const renderInlineBoldAndCode = (textStr) => {
+    if (!textStr) return null;
+    const parts = textStr.split(/(\*\*.*?\*\*|`[^`]+`)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-bold text-white">{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return (
+          <code key={i} className="bg-black/60 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono border border-white/10">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      return part;
+    });
+  };
+
+  const renderMarkdownBlock = (blockText, blockKey) => {
+    const lines = blockText.split('\n');
+    return (
+      <div key={blockKey} className="space-y-2 text-sm md:text-base leading-relaxed">
+        {lines.map((line, lIdx) => {
+          const trimmed = line.trim();
+          if (!trimmed) return <div key={lIdx} className="h-1" />;
+
+          if (trimmed.startsWith('### ')) {
+            return (
+              <h3 key={lIdx} className="text-base md:text-lg font-extrabold text-indigo-300 pt-2">
+                {renderInlineBoldAndCode(trimmed.slice(4))}
+              </h3>
+            );
+          }
+          if (trimmed.startsWith('## ')) {
+            return (
+              <h2 key={lIdx} className="text-lg md:text-xl font-extrabold text-white pt-3 border-b border-white/10 pb-1">
+                {renderInlineBoldAndCode(trimmed.slice(3))}
+              </h2>
+            );
+          }
+          if (trimmed.startsWith('# ')) {
+            return (
+              <h1 key={lIdx} className="text-xl font-black text-white pt-3">
+                {renderInlineBoldAndCode(trimmed.slice(2))}
+              </h1>
+            );
+          }
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            return (
+              <div key={lIdx} className="flex items-start gap-2 pl-2">
+                <span className="text-indigo-400 font-bold mt-1">•</span>
+                <span className="flex-1 text-gray-200">{renderInlineBoldAndCode(trimmed.slice(2))}</span>
+              </div>
+            );
+          }
+          const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+          if (numMatch) {
+            return (
+              <div key={lIdx} className="flex items-start gap-2 pl-2">
+                <span className="text-indigo-400 font-bold font-mono text-xs mt-1">{numMatch[1]}.</span>
+                <span className="flex-1 text-gray-200">{renderInlineBoldAndCode(numMatch[2])}</span>
+              </div>
+            );
+          }
+
+          return (
+            <p key={lIdx} className="text-gray-200">
+              {renderInlineBoldAndCode(line)}
+            </p>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderFormattedAiText = (rawText, msgIndex, sources = []) => {
     if (!rawText) return null;
     const segments = rawText.split(/(```[\s\S]*?```)/g);
 
-    return segments.map((segment, idx) => {
-      if (segment.startsWith('```') && segment.endsWith('```')) {
-        const lines = segment.slice(3, -3).trim().split('\n');
-        const firstLine = lines[0]?.trim() || '';
-        const hasLang = /^[a-zA-Z0-9+#-]+$/.test(firstLine);
-        const lang = hasLang ? firstLine.toUpperCase() : 'CODE';
-        const codeContent = hasLang ? lines.slice(1).join('\n') : lines.join('\n');
-        const copyKey = `ai-${msgIndex}-${idx}`;
+    return (
+      <div className="space-y-3">
+        {segments.map((segment, idx) => {
+          if (segment.startsWith('```') && segment.endsWith('```')) {
+            const lines = segment.slice(3, -3).trim().split('\n');
+            const firstLine = lines[0]?.trim() || '';
+            const hasLang = /^[a-zA-Z0-9+#-]+$/.test(firstLine);
+            const lang = hasLang ? firstLine.toUpperCase() : 'CODE';
+            const codeContent = hasLang ? lines.slice(1).join('\n') : lines.join('\n');
+            const copyKey = `ai-${msgIndex}-${idx}`;
 
-        return (
-          <div key={idx} className="my-3 rounded-xl overflow-hidden border border-white/15 bg-[#050505]">
-            <div className="flex justify-between items-center px-3.5 py-1.5 bg-white/5 border-b border-white/10">
-              <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
-                {lang}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleCopyCode(copyKey, codeContent)}
-                className="flex items-center gap-1 text-[11px] text-gray-300 hover:text-white transition-colors"
-              >
-                {copiedId === copyKey ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" /> Copy Code
-                  </>
-                )}
-              </button>
+            return (
+              <div key={idx} className="my-3 rounded-xl overflow-hidden border border-white/15 bg-[#050505]">
+                <div className="flex justify-between items-center px-3.5 py-2 bg-white/5 border-b border-white/10">
+                  <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
+                    {lang}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCode(copyKey, codeContent)}
+                    className="flex items-center gap-1 text-[11px] text-gray-300 hover:text-white transition-colors"
+                  >
+                    {copiedId === copyKey ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> Copy Code
+                      </>
+                    )}
+                  </button>
+                </div>
+                <pre className="p-3.5 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                  {codeContent}
+                </pre>
+              </div>
+            );
+          }
+
+          return renderMarkdownBlock(segment, idx);
+        })}
+
+        {Array.isArray(sources) && sources.length > 0 && (
+          <div className="pt-3 mt-3 border-t border-white/10">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 mb-2">
+              <Globe className="w-3.5 h-3.5" /> Live Google Search Sources
             </div>
-            <pre className="p-3.5 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-              {codeContent}
-            </pre>
+            <div className="flex flex-wrap gap-2">
+              {sources.map((src, sIdx) => (
+                <a
+                  key={sIdx}
+                  href={src.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs bg-white/5 hover:bg-indigo-500/20 border border-white/10 hover:border-indigo-500/40 text-indigo-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all truncate max-w-[240px]"
+                >
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{src.title}</span>
+                </a>
+              ))}
+            </div>
           </div>
-        );
-      }
-
-      return (
-        <p key={idx} className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">
-          {segment}
-        </p>
-      );
-    });
+        )}
+      </div>
+    );
   };
 
   const initCodele = () => {
@@ -2120,18 +2260,27 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       case 'auraBot':
         return (
           <div className="flex flex-col h-full animate-fade-up">
-            <div className="p-4 md:p-6 border-b border-white/10 bg-[#0a0a0f] flex justify-between items-center">
+            <div className="p-4 md:p-6 border-b border-white/10 bg-[#0a0a0f] flex justify-between items-center flex-wrap gap-2">
               <div>
                 <h1 className="text-xl md:text-2xl font-bold text-indigo-400 flex items-center gap-2">
                   <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Companion
                 </h1>
                 <p className="text-xs text-gray-400">
-                  AI Assistant — AI can make mistakes, so please verify important outputs.
+                  AI Assistant with Live Web Search — AI can make mistakes, so please verify important outputs.
                 </p>
               </div>
-              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
-                ● Online
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearChat}
+                  className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> New Chat
+                </button>
+                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1">
+                  <Globe className="w-3 h-3" /> Search & Reasoning Active
+                </span>
+              </div>
             </div>
             
             <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
@@ -2140,12 +2289,12 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.sender === 'user' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
                     {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
                   </div>
-                  <div className={`p-4 rounded-2xl max-w-[88%] md:max-w-[78%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                  <div className={`p-4 rounded-2xl max-w-[90%] md:max-w-[80%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
                     {msg.image && (
                       <img src={msg.image} alt="Uploaded" className="max-h-52 rounded-lg mb-2 border border-white/20 object-cover" />
                     )}
                     {msg.sender === 'aura'
-                      ? renderFormattedAiText(msg.text, idx)
+                      ? renderFormattedAiText(msg.text, idx, msg.sources)
                       : <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                   </div>
                 </div>
@@ -2155,8 +2304,9 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
                     <Sparkles className="w-4 h-4 text-white animate-spin" />
                   </div>
-                  <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm">
-                    Aura is thinking...
+                  <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                    Aura is researching and generating your complete response...
                   </div>
                 </div>
               )}
@@ -2188,7 +2338,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask Aura a question..." 
+                  placeholder="Search anything or give Aura any coding, writing, or research task..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
                 <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg shrink-0">
