@@ -458,7 +458,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hello! I am Aura, your AI assistant with live web search and deep task execution. I am an AI, so I can make mistakes—please review code and important information carefully. What task or search can I help you with today?" 
+      text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. What task or question can I help you with today?" 
     }
   ]);
   const chatEndRef = useRef(null);
@@ -1139,7 +1139,7 @@ export default function App() {
     setChatHistory([
       {
         sender: 'aura',
-        text: "Hello! I am Aura, your AI assistant with live web search and deep task execution. I am an AI, so I can make mistakes—please review code and important information carefully. What task or search can I help you with today?"
+        text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. What task or question can I help you with today?"
       }
     ]);
     showToast('✨ Started a fresh chat session!');
@@ -1160,23 +1160,22 @@ export default function App() {
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const systemPrompt = `You are Aura, an elite, comprehensive AI assistant, researcher, and software architect inside Nexus Studio.
-When the user searches for information or gives you any task, follow these rules:
-1. Deliver complete, thorough, high-value results—never give lazy, short, or vague summaries. If asked to write an essay, report, plan, script, or code, write the entire deliverable in full detail.
-2. Structure your response using clear Markdown headings (###), bullet points, numbered steps, and **bold** key terms so it is easy to scan and read.
-3. For coding or technical tasks, write complete, production-ready, bug-free code inside fenced markdown code blocks (\`\`\`language ... \`\`\`) and explain how it works step by step.
-4. For math, science, or logic tasks, work through the solution step-by-step and verify your final answer.
-5. For search or factual queries, provide up-to-date, concrete facts, figures, and specifics.`;
+    const systemPrompt = `You are Aura, a knowledgeable, helpful AI assistant, researcher, and coding mentor inside Nexus Studio.
+Rules for every response:
+1. For simple greetings or quick math, answer directly and naturally.
+2. For complex searches, coding, writing, or analytical tasks, provide a thorough, complete, step-by-step response using clear headings (###), bullet points, and **bold** text.
+3. When writing code, provide complete, working code inside fenced markdown code blocks (\`\`\`language ... \`\`\`) with a clear explanation.`;
 
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
-      const rawSlice = updatedHistory.slice(-12);
+      const rawSlice = updatedHistory.slice(-10);
       const firstUserIdx = rawSlice.findIndex((m) => m.sender === 'user');
       const validSlice = firstUserIdx !== -1 ? rawSlice.slice(firstUserIdx) : [];
 
       const geminiContents = [];
-      validSlice.forEach((msg) => {
+      validSlice.forEach((msg, idx) => {
         const role = msg.sender === 'user' ? 'user' : 'model';
-        const parts = [{ text: msg.text || ' ' }];
+        const prefix = idx === 0 && role === 'user' ? `${systemPrompt}\n\nUser request: ` : '';
+        const parts = [{ text: `${prefix}${msg.text || ' '}` }];
         if (msg.image) {
           const matches = msg.image.match(/^data:(.+);base64,(.+)$/);
           if (matches) {
@@ -1190,59 +1189,30 @@ When the user searches for information or gives you any task, follow these rules
         }
       });
 
-      const attemptConfigs = [
-        { model: 'gemini-2.5-flash', useSearch: !currentImage },
-        { model: 'gemini-2.5-pro', useSearch: false },
-        { model: 'gemini-2.5-flash', useSearch: false },
-        { model: 'gemini-2.0-flash', useSearch: false }
-      ];
-
-      for (const cfg of attemptConfigs) {
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      for (const modelName of modelsToTry) {
         try {
-          const requestBody = {
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: geminiContents,
-            generationConfig: {
-              temperature: 0.35,
-              topP: 0.95,
-              maxOutputTokens: 8192
-            }
-          };
-
-          if (cfg.useSearch) {
-            requestBody.tools = [{ google_search: {} }];
-          }
-
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(requestBody)
+              body: JSON.stringify({
+                contents: geminiContents,
+                generationConfig: {
+                  temperature: 0.35,
+                  maxOutputTokens: 4096
+                }
+              })
             }
           );
 
           if (response.ok) {
             const data = await response.json();
-            const candidate = data?.candidates?.[0];
-            const parts = candidate?.content?.parts || [];
+            const parts = data?.candidates?.[0]?.content?.parts || [];
             const aiReply = parts.map((p) => p.text || '').join('\n').trim();
-
-            const rawChunks = candidate?.groundingMetadata?.groundingChunks || [];
-            const sources = [];
-            rawChunks.forEach((chunk) => {
-              if (chunk?.web?.uri && chunk?.web?.title) {
-                if (!sources.some((s) => s.uri === chunk.web.uri)) {
-                  sources.push({ title: chunk.web.title, uri: chunk.web.uri });
-                }
-              }
-            });
-
             if (aiReply) {
-              setChatHistory([
-                ...updatedHistory,
-                { sender: 'aura', text: aiReply, sources: sources.slice(0, 5) }
-              ]);
+              setChatHistory([...updatedHistory, { sender: 'aura', text: aiReply }]);
               setIsAiLoading(false);
               return;
             }
@@ -1251,46 +1221,100 @@ When the user searches for information or gives you any task, follow these rules
       }
     }
 
-    const fallbackModels = ['searchgpt', 'openai-large', 'openai', 'deepseek'];
-    for (const fbModel of fallbackModels) {
-      try {
-        const openAiMessages = [
-          { role: 'system', content: systemPrompt },
-          ...updatedHistory
-            .filter((_, idx) => idx > 0)
-            .slice(-8)
-            .map((msg) => {
-              if (msg.image) {
-                return {
-                  role: msg.sender === 'user' ? 'user' : 'assistant',
-                  content: [
-                    { type: 'text', text: msg.text || 'Analyze this image thoroughly.' },
-                    { type: 'image_url', image_url: { url: msg.image } }
-                  ]
-                };
-              }
-              return {
-                role: msg.sender === 'user' ? 'user' : 'assistant',
-                content: msg.text
-              };
-            })
-        ];
+    const postEndpoints = [
+      { url: 'https://text.pollinations.ai/', model: 'openai', rawText: true },
+      { url: 'https://text.pollinations.ai/openai', model: 'openai', rawText: false },
+      { url: 'https://text.pollinations.ai/openai', model: 'mistral', rawText: false }
+    ];
 
-        const liveRes = await fetch('https://text.pollinations.ai/openai', {
+    const openAiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...updatedHistory
+        .filter((_, idx) => idx > 0)
+        .slice(-6)
+        .map((msg) => {
+          if (msg.image) {
+            return {
+              role: msg.sender === 'user' ? 'user' : 'assistant',
+              content: [
+                { type: 'text', text: msg.text || 'Analyze this image.' },
+                { type: 'image_url', image_url: { url: msg.image } }
+              ]
+            };
+          }
+          return {
+            role: msg.sender === 'user' ? 'user' : 'assistant',
+            content: msg.text
+          };
+        })
+    ];
+
+    for (const ep of postEndpoints) {
+      try {
+        const liveRes = await fetch(ep.url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: fbModel,
-            temperature: 0.35,
+            model: ep.model,
             messages: openAiMessages
           })
         });
 
         if (liveRes.ok) {
-          const data = await liveRes.json();
-          const liveReply = data?.choices?.[0]?.message?.content;
-          if (liveReply) {
-            setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply }]);
+          if (ep.rawText) {
+            const textData = await liveRes.text();
+            if (textData && textData.trim()) {
+              try {
+                const maybeJson = JSON.parse(textData);
+                const parsedReply = maybeJson?.choices?.[0]?.message?.content || textData.trim();
+                setChatHistory([...updatedHistory, { sender: 'aura', text: parsedReply }]);
+              } catch {
+                setChatHistory([...updatedHistory, { sender: 'aura', text: textData.trim() }]);
+              }
+              setIsAiLoading(false);
+              return;
+            }
+          } else {
+            const data = await liveRes.json();
+            const liveReply = data?.choices?.[0]?.message?.content;
+            if (liveReply) {
+              setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply }]);
+              setIsAiLoading(false);
+              return;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const recentTurns = updatedHistory
+      .filter((_, idx) => idx > 0)
+      .slice(-4)
+      .map((m) => `${m.sender === 'user' ? 'User' : 'Aura'}: ${(m.text || '').slice(0, 220)}`)
+      .join('\n');
+
+    const enhancedPrompt = encodeURIComponent(
+      `You are Aura, an expert AI assistant. Give a complete, well-structured, accurate answer (use headings, bullet points, and code blocks when helpful).\n\n${recentTurns}\n\nAnswer the user's latest message thoroughly: ${userMessage}`
+    );
+
+    const simpleDirectPrompt = encodeURIComponent(
+      `You are Aura, a helpful and knowledgeable AI assistant. Provide a complete, clear, and well-structured answer to: ${userMessage}`
+    );
+
+    const getUrlsToTry = [
+      `https://text.pollinations.ai/${enhancedPrompt}?model=openai`,
+      `https://text.pollinations.ai/${simpleDirectPrompt}?model=openai`,
+      `https://text.pollinations.ai/${simpleDirectPrompt}`,
+      `https://text.pollinations.ai/${encodeURIComponent(userMessage || 'Hello')}`
+    ];
+
+    for (const getUrl of getUrlsToTry) {
+      try {
+        const getRes = await fetch(getUrl);
+        if (getRes.ok) {
+          const textReply = await getRes.text();
+          if (textReply && textReply.trim()) {
+            setChatHistory([...updatedHistory, { sender: 'aura', text: textReply.trim() }]);
             setIsAiLoading(false);
             return;
           }
@@ -1383,7 +1407,7 @@ When the user searches for information or gives you any task, follow these rules
     );
   };
 
-  const renderFormattedAiText = (rawText, msgIndex, sources = []) => {
+  const renderFormattedAiText = (rawText, msgIndex) => {
     if (!rawText) return null;
     const segments = rawText.split(/(```[\s\S]*?```)/g);
 
@@ -1429,28 +1453,6 @@ When the user searches for information or gives you any task, follow these rules
 
           return renderMarkdownBlock(segment, idx);
         })}
-
-        {Array.isArray(sources) && sources.length > 0 && (
-          <div className="pt-3 mt-3 border-t border-white/10">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 mb-2">
-              <Globe className="w-3.5 h-3.5" /> Live Google Search Sources
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {sources.map((src, sIdx) => (
-                <a
-                  key={sIdx}
-                  href={src.uri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs bg-white/5 hover:bg-indigo-500/20 border border-white/10 hover:border-indigo-500/40 text-indigo-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all truncate max-w-[240px]"
-                >
-                  <ExternalLink className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{src.title}</span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -2266,7 +2268,7 @@ When the user searches for information or gives you any task, follow these rules
                   <Sparkles className="w-6 h-6 animate-pulse" /> Aura AI Companion
                 </h1>
                 <p className="text-xs text-gray-400">
-                  AI Assistant with Live Web Search — AI can make mistakes, so please verify important outputs.
+                  AI Assistant — AI can make mistakes, so please verify important outputs.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2277,8 +2279,8 @@ When the user searches for information or gives you any task, follow these rules
                 >
                   <RotateCcw className="w-3.5 h-3.5" /> New Chat
                 </button>
-                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1">
-                  <Globe className="w-3 h-3" /> Search & Reasoning Active
+                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-semibold">
+                  ● Online
                 </span>
               </div>
             </div>
@@ -2294,7 +2296,7 @@ When the user searches for information or gives you any task, follow these rules
                       <img src={msg.image} alt="Uploaded" className="max-h-52 rounded-lg mb-2 border border-white/20 object-cover" />
                     )}
                     {msg.sender === 'aura'
-                      ? renderFormattedAiText(msg.text, idx, msg.sources)
+                      ? renderFormattedAiText(msg.text, idx)
                       : <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                   </div>
                 </div>
@@ -2306,7 +2308,7 @@ When the user searches for information or gives you any task, follow these rules
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                    Aura is researching and generating your complete response...
+                    Aura is thinking...
                   </div>
                 </div>
               )}
@@ -2338,7 +2340,7 @@ When the user searches for information or gives you any task, follow these rules
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Search anything or give Aura any coding, writing, or research task..." 
+                  placeholder="Ask Aura any question or give it a coding, writing, or study task..." 
                   className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
                 <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg shrink-0">
