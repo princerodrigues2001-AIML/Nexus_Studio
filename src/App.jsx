@@ -240,6 +240,15 @@ export default function App() {
     }
   });
 
+  const [deviceNotifiedMap, setDeviceNotifiedMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexus_device_notified_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   const [feedbackList, setFeedbackList] = useState(() => {
     try {
       const saved = localStorage.getItem('nexus_feedback_list');
@@ -288,7 +297,7 @@ export default function App() {
   };
 
   const getTasksForEmail = (emailStr) => {
-    if (!emailStr) return DEFAULT_TASKS;
+    if (!emailStr) return [];
     const clean = emailStr.trim().toLowerCase();
     const safeKey = emailToFirebaseKey(clean);
     const entry = userTasksMap[safeKey] ?? userTasksMap[clean];
@@ -300,11 +309,11 @@ export default function App() {
     if (foundUser && foundUser.tasksInitialized) {
       return Array.isArray(foundUser.studyTasks) ? foundUser.studyTasks : [];
     }
-    return DEFAULT_TASKS;
+    return DEFAULT_TASKS.map((t) => ({ ...t, ownerEmail: clean }));
   };
 
   const getBagForEmail = (emailStr) => {
-    if (!emailStr) return DEFAULT_BAG;
+    if (!emailStr) return [];
     const clean = emailStr.trim().toLowerCase();
     const safeKey = emailToFirebaseKey(clean);
     const entry = userBagMap[safeKey] ?? userBagMap[clean];
@@ -321,8 +330,8 @@ export default function App() {
 
   const mumuPoints = activeEmail ? getPointsForEmail(activeEmail) : 0;
   const currentPersonalSnippets = activeEmail ? getPersonalSnippetsForEmail(activeEmail) : [];
-  const currentStudyTasks = activeEmail ? getTasksForEmail(activeEmail) : DEFAULT_TASKS;
-  const currentBagItems = activeEmail ? getBagForEmail(activeEmail) : DEFAULT_BAG;
+  const currentStudyTasks = activeEmail ? getTasksForEmail(activeEmail) : [];
+  const currentBagItems = activeEmail ? getBagForEmail(activeEmail) : [];
 
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('nexus_active_tab') || 'snippetHub');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -503,11 +512,11 @@ export default function App() {
 
   const fetchFromCloud = async (manual = false) => {
     if (!CLEAN_FIREBASE_URL) return null;
-    if (!manual && Date.now() - lastLocalWriteRef.current < 2000) return null;
+    if (!manual && Date.now() - lastLocalWriteRef.current < 1500) return null;
 
     try {
       if (manual) setIsSyncing(true);
-      const res = await fetch(`${CLEAN_FIREBASE_URL}/nexus_studio_state.json`);
+      const res = await fetch(`${CLEAN_FIREBASE_URL}/nexus_studio_state.json?t=${Date.now()}`);
       if (!res.ok) {
         setCloudConnected(false);
         return null;
@@ -560,7 +569,7 @@ export default function App() {
   useEffect(() => {
     if (!CLEAN_FIREBASE_URL) return;
     fetchFromCloud();
-    const interval = setInterval(() => fetchFromCloud(false), 2500);
+    const interval = setInterval(() => fetchFromCloud(false), 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -571,6 +580,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('nexus_user_personal_snippets_map', JSON.stringify(userPersonalSnippetsMap)), [userPersonalSnippetsMap]);
   useEffect(() => localStorage.setItem('nexus_user_tasks_map', JSON.stringify(userTasksMap)), [userTasksMap]);
   useEffect(() => localStorage.setItem('nexus_user_bag_map', JSON.stringify(userBagMap)), [userBagMap]);
+  useEffect(() => localStorage.setItem('nexus_device_notified_map', JSON.stringify(deviceNotifiedMap)), [deviceNotifiedMap]);
   useEffect(() => localStorage.setItem('nexus_feedback_list', JSON.stringify(feedbackList)), [feedbackList]);
   useEffect(() => localStorage.setItem('nexus_active_tab', activeTab), [activeTab]);
   useEffect(() => localStorage.setItem('nexus_snippets', JSON.stringify(snippets)), [snippets]);
@@ -594,7 +604,7 @@ export default function App() {
       const perm = await Notification.requestPermission();
       setNotifPermission(perm);
       if (perm === 'granted') {
-        showToast('🔔 Browser Push Notifications Enabled!');
+        showToast('🔔 Push Notifications Enabled for this device!');
       }
       return perm;
     } catch {
@@ -602,63 +612,79 @@ export default function App() {
     }
   };
 
-  const triggerProfessionalAlert = (task) => {
+  const triggerProfessionalAlert = (task, forEmail) => {
     playNotificationChime();
-    const formattedDeadline = new Date(task.deadline).toLocaleString();
+    const targetMs = task.deadlineTimestamp || new Date(task.deadline).getTime();
+    const formattedDeadline = new Date(targetMs).toLocaleString();
     const alertObj = {
       id: `${task.id}-${Date.now()}`,
       taskId: task.id,
-      title: 'Upcoming Task Deadline Reminder',
+      ownerEmail: forEmail,
+      title: `Deadline Alert (${forEmail})`,
       taskText: task.text,
       deadlineText: formattedDeadline,
       leadLabel: formatLeadTime(task.reminderMinutes)
     };
-    setActiveAlerts((prev) => [alertObj, ...prev]);
+    setActiveAlerts((prev) => {
+      if (prev.some((a) => a.taskId === task.id && a.ownerEmail === forEmail)) return prev;
+      return [alertObj, ...prev];
+    });
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
-        new Notification('⏰ Nexus TaskFlow Reminder', {
+        new Notification(`⏰ TaskFlow Reminder (${forEmail})`, {
           body: `"${task.text}" is due at ${formattedDeadline} (${formatLeadTime(task.reminderMinutes)} alert).`,
-          tag: `nexus-task-${task.id}`
+          tag: `nexus-task-${forEmail}-${task.id}`
         });
       } catch {}
     }
   };
 
   useEffect(() => {
-    if (!activeEmail || !activeSafeKey) return;
-    const checkReminders = () => {
+    if (userRole === 'guest' || !activeEmail || !activeSafeKey) {
+      setActiveAlerts([]);
+      return;
+    }
+
+    const checkAccountRemindersOnThisDevice = () => {
       const now = Date.now();
-      let changed = false;
-      const updatedTasks = currentStudyTasks.map((task) => {
+      let newDeviceNotifications = null;
+
+      currentStudyTasks.forEach((task) => {
+        if (task.ownerEmail && task.ownerEmail.toLowerCase() !== activeEmail.toLowerCase()) {
+          return;
+        }
         if (
           !task.done &&
           task.hasDeadline &&
           task.deadlineType === 'reminder' &&
-          task.deadline &&
-          !task.reminderSent
+          (task.deadlineTimestamp || task.deadline)
         ) {
-          const deadlineMs = new Date(task.deadline).getTime();
+          const deadlineMs = task.deadlineTimestamp || new Date(task.deadline).getTime();
+          if (isNaN(deadlineMs)) return;
           const offsetMs = (Number(task.reminderMinutes) || 0) * 60 * 1000;
           const triggerAtMs = deadlineMs - offsetMs;
-          if (now >= triggerAtMs) {
-            changed = true;
-            triggerProfessionalAlert(task);
-            return { ...task, reminderSent: true };
+          const deviceAlertKey = `${activeSafeKey}_${task.id}_${deadlineMs}_${task.reminderMinutes}`;
+
+          if (now >= triggerAtMs && !deviceNotifiedMap[deviceAlertKey]) {
+            if (!newDeviceNotifications) {
+              newDeviceNotifications = { ...deviceNotifiedMap };
+            }
+            newDeviceNotifications[deviceAlertKey] = true;
+            triggerProfessionalAlert(task, activeEmail);
           }
         }
-        return task;
       });
 
-      if (changed) {
-        syncUserTasks(updatedTasks);
+      if (newDeviceNotifications) {
+        setDeviceNotifiedMap(newDeviceNotifications);
       }
     };
 
-    checkReminders();
-    const timer = setInterval(checkReminders, 10000);
+    checkAccountRemindersOnThisDevice();
+    const timer = setInterval(checkAccountRemindersOnThisDevice, 2000);
     return () => clearInterval(timer);
-  }, [activeEmail, currentStudyTasks]);
+  }, [userRole, activeEmail, activeSafeKey, currentStudyTasks, deviceNotifiedMap]);
 
   const awardPoints = (amount, label = 'Bonus') => {
     if (!activeEmail || !activeSafeKey) {
@@ -717,6 +743,7 @@ export default function App() {
     const activeCloudBagMap = latestCloud?.userBagMap || userBagMap;
 
     if (emailInput === 'admin@nexus.com' && loginPassword === 'admin123') {
+      setActiveAlerts([]);
       setUserRole('admin');
       setCurrentUserEmail('admin@nexus.com');
       setShowLogin(false);
@@ -754,7 +781,7 @@ export default function App() {
       const existingTasksEntry = activeCloudTasksMap[safeKey];
       const userTasks = existingTasksEntry !== undefined
         ? (Array.isArray(existingTasksEntry) ? existingTasksEntry : (existingTasksEntry.items || []))
-        : (matchedUser.tasksInitialized ? (matchedUser.studyTasks || []) : DEFAULT_TASKS);
+        : (matchedUser.tasksInitialized ? (matchedUser.studyTasks || []) : DEFAULT_TASKS.map((t) => ({ ...t, ownerEmail: cleanId })));
 
       const existingBagEntry = activeCloudBagMap[safeKey];
       const userBag = existingBagEntry !== undefined
@@ -776,6 +803,7 @@ export default function App() {
         [safeKey]: { updatedAt: Date.now(), items: userBag }
       };
 
+      setActiveAlerts([]);
       setUserPointsMap(syncedPointsMap);
       setUserPersonalSnippetsMap(syncedPersonalMap);
       setUserTasksMap(syncedTasksMap);
@@ -848,12 +876,14 @@ export default function App() {
       return;
     }
 
+    const starterTasks = DEFAULT_TASKS.map((t) => ({ ...t, ownerEmail: cleanMail }));
+
     const newUser = {
       email: cleanMail,
       password: regPassword,
       points: 0,
       personalSnippets: [],
-      studyTasks: DEFAULT_TASKS,
+      studyTasks: starterTasks,
       tasksInitialized: true,
       bagItems: DEFAULT_BAG,
       bagInitialized: true,
@@ -871,13 +901,14 @@ export default function App() {
     };
     const updatedTasksMap = {
       ...sanitizeListMapForFirebase(currentCloudTasks),
-      [safeKey]: { updatedAt: Date.now(), items: DEFAULT_TASKS }
+      [safeKey]: { updatedAt: Date.now(), items: starterTasks }
     };
     const updatedBagMap = {
       ...sanitizeListMapForFirebase(currentCloudBag),
       [safeKey]: { updatedAt: Date.now(), items: DEFAULT_BAG }
     };
 
+    setActiveAlerts([]);
     setRegisteredUsers(updatedUsers);
     setUserPointsMap(updatedPointsMap);
     setUserPersonalSnippetsMap(updatedPersonalMap);
@@ -902,6 +933,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    setActiveAlerts([]);
     setUserRole('guest');
     setCurrentUserEmail('');
     setActiveTab('snippetHub');
@@ -1429,6 +1461,12 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
       return;
     }
 
+    const parsedDeadlineMs = taskHasDeadline ? new Date(taskDeadlineDateTime).getTime() : null;
+    if (taskHasDeadline && isNaN(parsedDeadlineMs)) {
+      showToast('⚠️ Invalid deadline date and time.');
+      return;
+    }
+
     let reminderMins = 0;
     if (taskHasDeadline && taskDeadlineType === 'reminder') {
       if (taskReminderPreset === 'custom') {
@@ -1442,13 +1480,14 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
 
     const newTaskObj = {
       id: Date.now(),
+      ownerEmail: activeEmail,
       text: newTaskText.trim(),
       done: false,
       hasDeadline: taskHasDeadline,
       deadlineType: taskHasDeadline ? taskDeadlineType : 'none',
       deadline: taskHasDeadline ? taskDeadlineDateTime : null,
-      reminderMinutes: taskHasDeadline && taskDeadlineType === 'reminder' ? reminderMins : null,
-      reminderSent: false
+      deadlineTimestamp: parsedDeadlineMs,
+      reminderMinutes: taskHasDeadline && taskDeadlineType === 'reminder' ? reminderMins : null
     };
 
     const updated = [newTaskObj, ...currentStudyTasks];
@@ -1457,7 +1496,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     setTaskDeadlineDateTime('');
     showToast(
       taskHasDeadline && taskDeadlineType === 'reminder'
-        ? `⏰ Task & Reminder (${formatLeadTime(reminderMins)}) synced!`
+        ? `⏰ Reminder synced to all devices logged into ${activeEmail}!`
         : `✅ Task saved & synced to ${activeEmail}!`
     );
   };
@@ -1472,7 +1511,8 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     if (!activeEmail) return;
     const updated = currentStudyTasks.filter(t => t.id !== id);
     syncUserTasks(updated);
-    showToast('🗑️ Task deleted & synced to your ID!');
+    setActiveAlerts((prev) => prev.filter((a) => a.taskId !== id));
+    showToast('🗑️ Task deleted & synced across your devices!');
   };
 
   const syncUserBag = (nextBag) => {
@@ -2104,7 +2144,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   <CheckSquare className="w-7 h-7 text-emerald-400" /> TaskFlow To-Do
                 </h1>
                 <p className="text-gray-400 text-sm">
-                  Personal To-Do & Smart Deadline Manager synced to <span className="text-emerald-400 font-semibold">{activeEmail}</span>
+                  Reminders notify all devices logged into <span className="text-emerald-400 font-semibold">{activeEmail}</span> only
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2208,7 +2248,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                           <Bell className="w-4 h-4" /> Reminder Deadline
                         </div>
                         <p className="text-[11px] text-gray-400 mt-1">
-                          Sends professional web & push alerts when the deadline is near.
+                          Notifies all devices logged into your email ID when deadline is near.
                         </p>
                       </button>
                     </div>
@@ -2290,11 +2330,12 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                 </div>
               ) : (
                 currentStudyTasks.map((task) => {
-                  const isOverdue =
-                    !task.done &&
-                    task.hasDeadline &&
-                    task.deadline &&
-                    new Date(task.deadline).getTime() < Date.now();
+                  const targetMs = task.deadlineTimestamp || (task.deadline ? new Date(task.deadline).getTime() : 0);
+                  const isOverdue = !task.done && task.hasDeadline && targetMs > 0 && targetMs < Date.now();
+                  const offsetMs = (Number(task.reminderMinutes) || 0) * 60 * 1000;
+                  const deviceAlertKey = activeSafeKey ? `${activeSafeKey}_${task.id}_${targetMs}_${task.reminderMinutes}` : '';
+                  const isNotifiedOnThisDevice = Boolean(deviceAlertKey && deviceNotifiedMap[deviceAlertKey]);
+                  const isWithinReminderWindow = targetMs > 0 && Date.now() >= (targetMs - offsetMs);
 
                   return (
                     <div
@@ -2317,7 +2358,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                           <span className={`block text-sm font-medium ${task.done ? 'line-through text-gray-500' : 'text-white'}`}>
                             {task.text}
                           </span>
-                          {task.hasDeadline && task.deadline && (
+                          {task.hasDeadline && targetMs > 0 && (
                             <div className="flex items-center gap-2 flex-wrap">
                               <span
                                 className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 border ${
@@ -2329,21 +2370,21 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                                 }`}
                               >
                                 <Calendar className="w-3 h-3" />
-                                Due: {new Date(task.deadline).toLocaleString()}
+                                Due: {new Date(targetMs).toLocaleString()}
                                 {isOverdue && !task.done ? ' (Overdue)' : ''}
                               </span>
 
                               {task.deadlineType === 'reminder' && (
                                 <span
                                   className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 border ${
-                                    task.reminderSent
+                                    isNotifiedOnThisDevice || isWithinReminderWindow
                                       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                                       : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                                   }`}
                                 >
                                   <Bell className="w-3 h-3" />
-                                  {task.reminderSent
-                                    ? 'Reminder Sent'
+                                  {isNotifiedOnThisDevice || isWithinReminderWindow
+                                    ? 'Alert Active across your devices'
                                     : `Alert: ${formatLeadTime(task.reminderMinutes)}`}
                                 </span>
                               )}
@@ -2550,43 +2591,45 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
         .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       `}</style>
 
-      {activeAlerts.length > 0 && (
+      {activeEmail && activeAlerts.filter((a) => a.ownerEmail === activeEmail).length > 0 && (
         <div className="fixed top-4 right-4 z-[250] space-y-3 max-w-sm w-full px-4 sm:px-0">
-          {activeAlerts.map((alertItem) => (
-            <div
-              key={alertItem.id}
-              className="bg-[#0e0e18] border-2 border-amber-500 rounded-2xl p-4 shadow-2xl shadow-amber-500/20 animate-pop-in"
-            >
-              <div className="flex justify-between items-start gap-2">
-                <div className="flex items-center gap-2 text-amber-400 font-extrabold text-xs uppercase tracking-wider">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  {alertItem.title}
+          {activeAlerts
+            .filter((a) => a.ownerEmail === activeEmail)
+            .map((alertItem) => (
+              <div
+                key={alertItem.id}
+                className="bg-[#0e0e18] border-2 border-amber-500 rounded-2xl p-4 shadow-2xl shadow-amber-500/20 animate-pop-in"
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="flex items-center gap-2 text-amber-400 font-extrabold text-xs uppercase tracking-wider">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    {alertItem.title}
+                  </div>
+                  <button
+                    onClick={() =>
+                      setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
+                    }
+                    className="text-gray-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={() =>
-                    setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
-                  }
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <p className="text-white font-bold text-sm mt-2">{alertItem.taskText}</p>
+                <p className="text-xs text-gray-300 mt-1">
+                  Deadline: <span className="text-amber-300 font-semibold">{alertItem.deadlineText}</span>
+                </p>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={() =>
+                      setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
+                    }
+                    className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold px-3.5 py-1.5 rounded-lg"
+                  >
+                    Acknowledge
+                  </button>
+                </div>
               </div>
-              <p className="text-white font-bold text-sm mt-2">{alertItem.taskText}</p>
-              <p className="text-xs text-gray-300 mt-1">
-                Deadline: <span className="text-amber-300 font-semibold">{alertItem.deadlineText}</span>
-              </p>
-              <div className="mt-3 flex justify-end">
-                <button
-                  onClick={() =>
-                    setActiveAlerts((prev) => prev.filter((a) => a.id !== alertItem.id))
-                  }
-                  className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold px-3.5 py-1.5 rounded-lg"
-                >
-                  Acknowledge
-                </button>
-              </div>
-            </div>
-          ))}
+            ))}
         </div>
       )}
 
