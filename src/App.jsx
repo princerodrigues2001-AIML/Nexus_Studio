@@ -6,7 +6,7 @@ import {
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
   UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, 
-  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle, Download, Globe
+  MessageSquare, FolderLock, ExternalLink, Bell, Clock, Calendar, AlertTriangle, Download
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -33,6 +33,37 @@ const CLEAN_FIREBASE_URL = resolveFirebaseDatabaseUrl(RAW_FIREBASE_URL);
 function emailToFirebaseKey(email) {
   if (!email) return '';
   return email.trim().toLowerCase().replace(/\./g, '_dot_').replace(/@/g, '_at_').replace(/[^a-z0-9_]/g, '_');
+}
+
+function compressImageFile(file, maxDimension = 800, quality = 0.72) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(event.target.result);
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 const DEFAULT_SNIPPETS = [
@@ -458,7 +489,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([
     { 
       sender: 'aura', 
-      text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. What task or question can I help you with today?" 
+      text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. How can I help you today?" 
     }
   ]);
   const chatEndRef = useRef(null);
@@ -1113,7 +1144,7 @@ export default function App() {
   const handleCopyCode = (id, fullCodeText) => {
     navigator.clipboard.writeText(fullCodeText);
     setCopiedId(id);
-    showToast('📋 Full content copied to clipboard!');
+    showToast('📋 Copied to clipboard!');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -1124,22 +1155,29 @@ export default function App() {
     }));
   };
 
-  const handleImageSelect = (e) => {
-    const file = e.target.files[0];
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedImage(reader.result);
-      showToast('📎 Image attached! Press Send to analyze.');
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressedDataUrl = await compressImageFile(file, 800, 0.72);
+      setSelectedImage(compressedDataUrl);
+      showToast('📎 Photo optimized & attached! Press Send.');
+    } catch {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedImage(reader.result);
+        showToast('📎 Photo attached! Press Send.');
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
   };
 
   const handleClearChat = () => {
     setChatHistory([
       {
         sender: 'aura',
-        text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. What task or question can I help you with today?"
+        text: "Hello! I am Aura, your AI assistant. I am an AI, so I can make mistakes—please review code and important information carefully. How can I help you today?"
       }
     ]);
     showToast('✨ Started a fresh chat session!');
@@ -1151,37 +1189,47 @@ export default function App() {
     if ((!userMessage && !selectedImage) || isAiLoading) return;
 
     const currentImage = selectedImage;
+    const effectiveUserPrompt = userMessage || 'Describe this image clearly and solve any question or code shown in it.';
     const updatedHistory = [
       ...chatHistory, 
-      { sender: 'user', text: userMessage || 'Analyze this attached image thoroughly and solve any tasks shown.', image: currentImage }
+      { sender: 'user', text: userMessage || '📷 [Attached Photo]', image: currentImage }
     ];
     setChatHistory(updatedHistory);
     setChatInput('');
     setSelectedImage(null);
     setIsAiLoading(true);
 
-    const systemPrompt = `You are Aura, a knowledgeable, helpful AI assistant, researcher, and coding mentor inside Nexus Studio.
-Rules for every response:
-1. For simple greetings or quick math, answer directly and naturally.
-2. For complex searches, coding, writing, or analytical tasks, provide a thorough, complete, step-by-step response using clear headings (###), bullet points, and **bold** text.
-3. When writing code, provide complete, working code inside fenced markdown code blocks (\`\`\`language ... \`\`\`) with a clear explanation.`;
+    const systemPrompt = `You are Aura, a clean, friendly, and intelligent AI assistant modeled after Gemini and Claude.
+Follow these formatting and coding rules strictly:
+1. Keep your output clean, well-spaced, and easy to read.
+2. Write Simple, Beginner-Friendly Code by Default: When asked to write a program, write the shortest, cleanest, most direct code possible (for example, 4 to 10 lines for standard programs). Never write 100 lines of over-engineered classes, complex error-handling, or heavy boilerplate unless the user explicitly asks for an advanced project.
+3. For coding requests, follow this exact clean layout:
+   - A 1-sentence friendly intro.
+   - One clean, minimal code block (\`\`\`language ... \`\`\`).
+   - **Output:** Show a short sample output.
+   - **How it works:** 2 to 3 simple bullet points explaining the logic.
+4. For general questions or tasks, use clear headings (###), short bullet points, and **bold** key terms.`;
 
     if (GEMINI_API_KEY && !GEMINI_API_KEY.includes('PASTE_YOUR')) {
-      const rawSlice = updatedHistory.slice(-10);
+      const rawSlice = updatedHistory.slice(-8);
       const firstUserIdx = rawSlice.findIndex((m) => m.sender === 'user');
       const validSlice = firstUserIdx !== -1 ? rawSlice.slice(firstUserIdx) : [];
 
       const geminiContents = [];
       validSlice.forEach((msg, idx) => {
+        const isLastMsg = idx === validSlice.length - 1;
         const role = msg.sender === 'user' ? 'user' : 'model';
-        const prefix = idx === 0 && role === 'user' ? `${systemPrompt}\n\nUser request: ` : '';
-        const parts = [{ text: `${prefix}${msg.text || ' '}` }];
-        if (msg.image) {
+        const prefix = idx === 0 && role === 'user' ? `${systemPrompt}\n\nUser: ` : '';
+        const textToUse = isLastMsg && role === 'user' ? effectiveUserPrompt : (msg.text || ' ');
+        const parts = [{ text: `${prefix}${textToUse}` }];
+
+        if (isLastMsg && msg.image) {
           const matches = msg.image.match(/^data:(.+);base64,(.+)$/);
           if (matches) {
             parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
           }
         }
+
         if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === role) {
           geminiContents[geminiContents.length - 1].parts.push(...parts);
         } else {
@@ -1200,7 +1248,7 @@ Rules for every response:
               body: JSON.stringify({
                 contents: geminiContents,
                 generationConfig: {
-                  temperature: 0.35,
+                  temperature: 0.3,
                   maxOutputTokens: 4096
                 }
               })
@@ -1221,32 +1269,30 @@ Rules for every response:
       }
     }
 
-    const postEndpoints = [
-      { url: 'https://text.pollinations.ai/', model: 'openai', rawText: true },
-      { url: 'https://text.pollinations.ai/openai', model: 'openai', rawText: false },
-      { url: 'https://text.pollinations.ai/openai', model: 'mistral', rawText: false }
-    ];
-
+    const historySlice = updatedHistory.filter((_, idx) => idx > 0).slice(-6);
     const openAiMessages = [
       { role: 'system', content: systemPrompt },
-      ...updatedHistory
-        .filter((_, idx) => idx > 0)
-        .slice(-6)
-        .map((msg) => {
-          if (msg.image) {
-            return {
-              role: msg.sender === 'user' ? 'user' : 'assistant',
-              content: [
-                { type: 'text', text: msg.text || 'Analyze this image.' },
-                { type: 'image_url', image_url: { url: msg.image } }
-              ]
-            };
-          }
+      ...historySlice.map((msg, idx) => {
+        const isLatest = idx === historySlice.length - 1;
+        if (isLatest && msg.image) {
           return {
-            role: msg.sender === 'user' ? 'user' : 'assistant',
-            content: msg.text
+            role: 'user',
+            content: [
+              { type: 'text', text: effectiveUserPrompt },
+              { type: 'image_url', image_url: { url: msg.image } }
+            ]
           };
-        })
+        }
+        return {
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: isLatest ? effectiveUserPrompt : (msg.text || '')
+        };
+      })
+    ];
+
+    const postEndpoints = [
+      { url: 'https://text.pollinations.ai/openai', model: 'openai', isJson: true },
+      { url: 'https://text.pollinations.ai/', model: 'openai', isJson: false }
     ];
 
     for (const ep of postEndpoints) {
@@ -1256,29 +1302,30 @@ Rules for every response:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: ep.model,
+            temperature: 0.3,
             messages: openAiMessages
           })
         });
 
         if (liveRes.ok) {
-          if (ep.rawText) {
-            const textData = await liveRes.text();
-            if (textData && textData.trim()) {
-              try {
-                const maybeJson = JSON.parse(textData);
-                const parsedReply = maybeJson?.choices?.[0]?.message?.content || textData.trim();
-                setChatHistory([...updatedHistory, { sender: 'aura', text: parsedReply }]);
-              } catch {
-                setChatHistory([...updatedHistory, { sender: 'aura', text: textData.trim() }]);
-              }
+          if (ep.isJson) {
+            const data = await liveRes.json();
+            const liveReply = data?.choices?.[0]?.message?.content;
+            if (liveReply && liveReply.trim()) {
+              setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply.trim() }]);
               setIsAiLoading(false);
               return;
             }
           } else {
-            const data = await liveRes.json();
-            const liveReply = data?.choices?.[0]?.message?.content;
-            if (liveReply) {
-              setChatHistory([...updatedHistory, { sender: 'aura', text: liveReply }]);
+            const textData = await liveRes.text();
+            if (textData && textData.trim()) {
+              try {
+                const parsed = JSON.parse(textData);
+                const replyText = parsed?.choices?.[0]?.message?.content || textData.trim();
+                setChatHistory([...updatedHistory, { sender: 'aura', text: replyText }]);
+              } catch {
+                setChatHistory([...updatedHistory, { sender: 'aura', text: textData.trim() }]);
+              }
               setIsAiLoading(false);
               return;
             }
@@ -1287,39 +1334,30 @@ Rules for every response:
       } catch {}
     }
 
-    const recentTurns = updatedHistory
-      .filter((_, idx) => idx > 0)
-      .slice(-4)
-      .map((m) => `${m.sender === 'user' ? 'User' : 'Aura'}: ${(m.text || '').slice(0, 220)}`)
-      .join('\n');
+    if (!currentImage) {
+      const conciseInstruction = encodeURIComponent(
+        `You are Aura (like Gemini/Claude). Give a clean, user-friendly response. If writing code, write simple, short, beginner-friendly code (4-10 lines) with sample output and brief bullet points.\n\nUser request: ${effectiveUserPrompt}`
+      );
 
-    const enhancedPrompt = encodeURIComponent(
-      `You are Aura, an expert AI assistant. Give a complete, well-structured, accurate answer (use headings, bullet points, and code blocks when helpful).\n\n${recentTurns}\n\nAnswer the user's latest message thoroughly: ${userMessage}`
-    );
+      const getUrlsToTry = [
+        `https://text.pollinations.ai/${conciseInstruction}?model=openai`,
+        `https://text.pollinations.ai/${encodeURIComponent(effectiveUserPrompt)}?model=openai`,
+        `https://text.pollinations.ai/${encodeURIComponent(effectiveUserPrompt)}`
+      ];
 
-    const simpleDirectPrompt = encodeURIComponent(
-      `You are Aura, a helpful and knowledgeable AI assistant. Provide a complete, clear, and well-structured answer to: ${userMessage}`
-    );
-
-    const getUrlsToTry = [
-      `https://text.pollinations.ai/${enhancedPrompt}?model=openai`,
-      `https://text.pollinations.ai/${simpleDirectPrompt}?model=openai`,
-      `https://text.pollinations.ai/${simpleDirectPrompt}`,
-      `https://text.pollinations.ai/${encodeURIComponent(userMessage || 'Hello')}`
-    ];
-
-    for (const getUrl of getUrlsToTry) {
-      try {
-        const getRes = await fetch(getUrl);
-        if (getRes.ok) {
-          const textReply = await getRes.text();
-          if (textReply && textReply.trim()) {
-            setChatHistory([...updatedHistory, { sender: 'aura', text: textReply.trim() }]);
-            setIsAiLoading(false);
-            return;
+      for (const getUrl of getUrlsToTry) {
+        try {
+          const getRes = await fetch(getUrl);
+          if (getRes.ok) {
+            const textReply = await getRes.text();
+            if (textReply && textReply.trim()) {
+              setChatHistory([...updatedHistory, { sender: 'aura', text: textReply.trim() }]);
+              setIsAiLoading(false);
+              return;
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     }
 
     setChatHistory([
@@ -1341,7 +1379,7 @@ Rules for every response:
       }
       if (part.startsWith('`') && part.endsWith('`')) {
         return (
-          <code key={i} className="bg-black/60 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono border border-white/10">
+          <code key={i} className="bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono border border-indigo-500/25">
             {part.slice(1, -1)}
           </code>
         );
@@ -1353,11 +1391,21 @@ Rules for every response:
   const renderMarkdownBlock = (blockText, blockKey) => {
     const lines = blockText.split('\n');
     return (
-      <div key={blockKey} className="space-y-2 text-sm md:text-base leading-relaxed">
+      <div key={blockKey} className="space-y-2 text-sm md:text-[15px] leading-relaxed">
         {lines.map((line, lIdx) => {
           const trimmed = line.trim();
-          if (!trimmed) return <div key={lIdx} className="h-1" />;
+          if (!trimmed) return <div key={lIdx} className="h-1.5" />;
 
+          if (trimmed === '---' || trimmed === '***') {
+            return <hr key={lIdx} className="border-white/10 my-2" />;
+          }
+          if (trimmed.startsWith('#### ')) {
+            return (
+              <h4 key={lIdx} className="text-sm md:text-base font-bold text-indigo-200 pt-1.5">
+                {renderInlineBoldAndCode(trimmed.slice(5))}
+              </h4>
+            );
+          }
           if (trimmed.startsWith('### ')) {
             return (
               <h3 key={lIdx} className="text-base md:text-lg font-extrabold text-indigo-300 pt-2">
@@ -1379,10 +1427,10 @@ Rules for every response:
               </h1>
             );
           }
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('• ')) {
             return (
-              <div key={lIdx} className="flex items-start gap-2 pl-2">
-                <span className="text-indigo-400 font-bold mt-1">•</span>
+              <div key={lIdx} className="flex items-start gap-2.5 pl-1.5">
+                <span className="text-indigo-400 font-bold mt-0.5">•</span>
                 <span className="flex-1 text-gray-200">{renderInlineBoldAndCode(trimmed.slice(2))}</span>
               </div>
             );
@@ -1390,7 +1438,7 @@ Rules for every response:
           const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
           if (numMatch) {
             return (
-              <div key={lIdx} className="flex items-start gap-2 pl-2">
+              <div key={lIdx} className="flex items-start gap-2.5 pl-1.5">
                 <span className="text-indigo-400 font-bold font-mono text-xs mt-1">{numMatch[1]}.</span>
                 <span className="flex-1 text-gray-200">{renderInlineBoldAndCode(numMatch[2])}</span>
               </div>
@@ -1410,6 +1458,7 @@ Rules for every response:
   const renderFormattedAiText = (rawText, msgIndex) => {
     if (!rawText) return null;
     const segments = rawText.split(/(```[\s\S]*?```)/g);
+    const fullAnswerCopyKey = `full-ai-${msgIndex}`;
 
     return (
       <div className="space-y-3">
@@ -1423,28 +1472,30 @@ Rules for every response:
             const copyKey = `ai-${msgIndex}-${idx}`;
 
             return (
-              <div key={idx} className="my-3 rounded-xl overflow-hidden border border-white/15 bg-[#050505]">
-                <div className="flex justify-between items-center px-3.5 py-2 bg-white/5 border-b border-white/10">
-                  <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
+              <div key={idx} className="my-3 rounded-xl overflow-hidden border border-indigo-500/25 bg-[#07070c] shadow-lg">
+                <div className="flex justify-between items-center px-4 py-2 bg-[#10101a] border-b border-white/10">
+                  <span className="text-[11px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
                     {lang}
                   </span>
                   <button
                     type="button"
                     onClick={() => handleCopyCode(copyKey, codeContent)}
-                    className="flex items-center gap-1 text-[11px] text-gray-300 hover:text-white transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-md transition-colors"
                   >
                     {copiedId === copyKey ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400 font-semibold">Copied</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-3.5 h-3.5" /> Copy Code
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Code</span>
                       </>
                     )}
                   </button>
                 </div>
-                <pre className="p-3.5 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                <pre className="p-4 text-xs md:text-[13px] font-mono text-emerald-100 overflow-x-auto whitespace-pre-wrap leading-relaxed">
                   {codeContent}
                 </pre>
               </div>
@@ -1453,6 +1504,26 @@ Rules for every response:
 
           return renderMarkdownBlock(segment, idx);
         })}
+
+        {msgIndex > 0 && (
+          <div className="pt-2 border-t border-white/5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => handleCopyCode(fullAnswerCopyKey, rawText)}
+              className="text-[11px] text-gray-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+            >
+              {copiedId === fullAnswerCopyKey ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-400" /> Copied Response
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" /> Copy Response
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -2285,15 +2356,15 @@ Rules for every response:
               </div>
             </div>
             
-            <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
+            <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5">
               {chatHistory.map((msg, idx) => (
                 <div key={idx} className={`flex gap-3 animate-fade-up ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.sender === 'user' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
                     {msg.sender === 'user' ? <User className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
                   </div>
-                  <div className={`p-4 rounded-2xl max-w-[90%] md:max-w-[80%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none'}`}>
+                  <div className={`p-4 md:p-5 rounded-2xl max-w-[90%] md:max-w-[80%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-[#12121a] border border-white/10 text-gray-200 rounded-tl-none shadow-lg'}`}>
                     {msg.image && (
-                      <img src={msg.image} alt="Uploaded" className="max-h-52 rounded-lg mb-2 border border-white/20 object-cover" />
+                      <img src={msg.image} alt="Uploaded" className="max-h-56 rounded-xl mb-3 border border-white/20 object-contain bg-black/40" />
                     )}
                     {msg.sender === 'aura'
                       ? renderFormattedAiText(msg.text, idx)
@@ -2308,7 +2379,7 @@ Rules for every response:
                   </div>
                   <div className="bg-[#12121a] border border-white/10 text-gray-400 p-4 rounded-2xl rounded-tl-none text-sm flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                    Aura is thinking...
+                    Aura is generating a clean response...
                   </div>
                 </div>
               )}
@@ -2317,9 +2388,12 @@ Rules for every response:
 
             <div className="p-4 md:p-6 border-t border-white/10 bg-[#0a0a0f]">
               {selectedImage && (
-                <div className="flex items-center gap-3 mb-3 bg-[#12121a] p-2 rounded-lg border border-indigo-500/30 w-fit">
-                  <img src={selectedImage} alt="Preview" className="w-12 h-12 object-cover rounded" />
-                  <span className="text-xs text-gray-300">Image ready to send</span>
+                <div className="flex items-center gap-3 mb-3 bg-[#12121a] p-2.5 rounded-xl border border-indigo-500/40 w-fit">
+                  <img src={selectedImage} alt="Preview" className="w-12 h-12 object-cover rounded-lg border border-white/10" />
+                  <div>
+                    <span className="text-xs font-semibold text-indigo-300 block">Photo Ready for Vision AI</span>
+                    <span className="text-[10px] text-gray-400 block">Add a question or press Send directly</span>
+                  </div>
                   <button onClick={() => setSelectedImage(null)} className="text-red-400 hover:text-red-300 p-1">
                     <X className="w-4 h-4" />
                   </button>
@@ -2331,8 +2405,8 @@ Rules for every response:
                 <button 
                   type="button" 
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-[#12121a] hover:bg-white/10 border border-white/10 p-3 rounded-lg text-gray-400 hover:text-white transition-colors"
-                  title="Attach Image or Screenshot"
+                  className="bg-[#12121a] hover:bg-white/10 border border-white/10 p-3 rounded-xl text-gray-400 hover:text-white transition-colors"
+                  title="Upload Photo or Screenshot"
                 >
                   <Paperclip className="w-5 h-5" />
                 </button>
@@ -2340,10 +2414,10 @@ Rules for every response:
                   type="text" 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask Aura any question or give it a coding, writing, or study task..." 
-                  className="flex-1 bg-[#12121a] border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
+                  placeholder="Ask Aura anything or upload a photo..." 
+                  className="flex-1 bg-[#12121a] border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-white text-sm"
                 />
-                <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-lg shrink-0">
+                <button type="submit" disabled={isAiLoading} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-3 rounded-xl shrink-0 transition-all">
                   <Send className="w-5 h-5 text-white" />
                 </button>
               </form>
