@@ -5,7 +5,7 @@ import {
   CheckSquare, Briefcase, Trash2, Edit2, Copy, Check, 
   Zap, Grid, RotateCcw, Paperclip, Cloud, CloudOff,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Brain, RefreshCw,
-  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare, FolderLock
+  UserPlus, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, MessageSquare, FolderLock, ExternalLink
 } from 'lucide-react';
 
 const GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
@@ -46,7 +46,7 @@ const DEFAULT_SNIPPETS = [
 ];
 
 const DEFAULT_PERSONAL_SNIPPETS = [
-  { id: 101, title: 'Private Admin Config Template', category: 'JS', code: 'export const ADMIN_CONFIG = {\n  syncInterval: 2500,\n  strictAuth: true\n};' }
+  { id: 101, title: 'Private Admin Config Template', category: 'GENERAL', code: 'export const ADMIN_CONFIG = {\n  syncInterval: 2500,\n  strictAuth: true\n};' }
 ];
 
 const DEFAULT_TASKS = [
@@ -294,7 +294,7 @@ export default function App() {
   const [snippetModalTarget, setSnippetModalTarget] = useState('public');
   const [editingSnippet, setEditingSnippet] = useState(null);
   const [snippetTitle, setSnippetTitle] = useState('');
-  const [snippetCategory, setSnippetCategory] = useState('JS');
+  const [snippetCategory, setSnippetCategory] = useState('GENERAL');
   const [snippetCode, setSnippetCode] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
@@ -656,7 +656,7 @@ export default function App() {
     setSnippetModalTarget(target);
     setEditingSnippet(null);
     setSnippetTitle('');
-    setSnippetCategory('JS');
+    setSnippetCategory('GENERAL');
     setSnippetCode('');
     setShowSnippetModal(true);
   };
@@ -666,7 +666,7 @@ export default function App() {
     setSnippetModalTarget(target);
     setEditingSnippet(snippet);
     setSnippetTitle(snippet.title);
-    setSnippetCategory(snippet.category || 'JS');
+    setSnippetCategory(snippet.category || 'GENERAL');
     setSnippetCode(snippet.code);
     setShowSnippetModal(true);
   };
@@ -742,7 +742,7 @@ export default function App() {
   const handleCopyCode = (id, fullCodeText) => {
     navigator.clipboard.writeText(fullCodeText);
     setCopiedId(id);
-    showToast('📋 Full code copied to clipboard!');
+    showToast('📋 Full content copied to clipboard!');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -1209,6 +1209,13 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
     (s.category && s.category.toLowerCase().includes(personalSearchQuery.toLowerCase()))
   );
 
+  const extractValidUrl = (text) => {
+    const trimmed = (text || '').trim();
+    if (/^https?:\/\/\S+$/i.test(trimmed)) return trimmed;
+    const match = trimmed.match(/https?:\/\/[^\s]+/i);
+    return match ? match[0] : null;
+  };
+
   const renderSnippetCards = (list, targetType = 'public') => {
     if (list.length === 0) {
       return (
@@ -1231,6 +1238,8 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               ? codeLines.slice(0, 6).join('\n').slice(0, 220) + '...'
               : snippet.code;
 
+          const detectedUrl = snippet.category === 'LINK' ? extractValidUrl(snippet.code) : null;
+
           return (
             <div 
               key={snippet.id} 
@@ -1248,7 +1257,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                       ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                       : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/20'
                   }`}>
-                    {snippet.category || 'CODE'}
+                    {snippet.category || 'GENERAL'}
                   </span>
                   {targetType === 'personal' && (
                     <span className="text-[10px] font-semibold text-amber-400/80 flex items-center gap-0.5">
@@ -1257,10 +1266,22 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   )}
                 </div>
                 <div className="flex items-center gap-1">
+                  {detectedUrl && (
+                    <a
+                      href={detectedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 text-cyan-400 hover:text-cyan-300 rounded bg-cyan-500/10 hover:bg-cyan-500/20 transition-all flex items-center gap-1 text-xs font-semibold"
+                      title="Open Link"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open</span>
+                    </a>
+                  )}
                   <button 
                     onClick={() => handleCopyCode(expandKey, snippet.code)}
                     className="px-2 py-1 text-gray-300 hover:text-white rounded bg-white/5 hover:bg-white/10 transition-all flex items-center gap-1 text-xs"
-                    title="Copy Full Code"
+                    title="Copy Full Content"
                   >
                     {copiedId === expandKey ? (
                       <>
@@ -1296,7 +1317,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
               </div>
               <h3 className="font-bold text-white text-lg mb-3">{snippet.title}</h3>
               <div className="bg-[#050505] rounded-lg border border-white/5 overflow-hidden flex flex-col">
-                <pre className="p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                <pre className="p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap break-words">
                   {displayedCode}
                 </pre>
                 {isLongSnippet && (
@@ -1359,7 +1380,7 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   </button>
                 </div>
                 <p className="text-gray-400 text-sm mt-1">
-                  Public library of quick code utilities (Managed exclusively by Admin).
+                  Public library of code, links, and text utilities (Managed exclusively by Admin).
                 </p>
               </div>
 
@@ -2087,18 +2108,21 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                   type="text"
                   value={snippetTitle}
                   onChange={(e) => setSnippetTitle(e.target.value)}
-                  placeholder="e.g., Center a Div"
+                  placeholder="Enter title..."
                   className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Language / Category</label>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Category</label>
                 <select
                   value={snippetCategory}
                   onChange={(e) => setSnippetCategory(e.target.value)}
                   className="w-full bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                 >
+                  <option value="GENERAL">General</option>
+                  <option value="LINK">Link</option>
+                  <option value="TEXT">Text</option>
                   <option value="JS">JavaScript (JS)</option>
                   <option value="REACT">React</option>
                   <option value="CSS">CSS</option>
@@ -2107,12 +2131,20 @@ Provide clear answers and put code examples inside markdown code blocks (\`\`\`l
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Code</label>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">
+                  {snippetCategory === 'LINK' ? 'Link / URL' : snippetCategory === 'TEXT' ? 'Text Content' : 'Content / Code'}
+                </label>
                 <textarea
                   rows={6}
                   value={snippetCode}
                   onChange={(e) => setSnippetCode(e.target.value)}
-                  placeholder="Paste your code here..."
+                  placeholder={
+                    snippetCategory === 'LINK'
+                      ? 'Paste your link (e.g., https://...) here...'
+                      : snippetCategory === 'TEXT'
+                        ? 'Enter your text or notes here...'
+                        : 'Paste your content or code here...'
+                  }
                   className="w-full bg-[#12121a] border border-white/10 rounded-lg p-3 text-sm font-mono text-white focus:outline-none focus:border-indigo-500"
                   required
                 />
